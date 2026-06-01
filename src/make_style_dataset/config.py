@@ -130,6 +130,12 @@ class Settings(BaseSettings):
         description="Also write a mask/panel overlay to manual_review for visual inspection.",
     )
 
+    # --- Pipeline: Stage 3 (inpaint) ---
+    inpaint_backend: str = Field(
+        default="lama",
+        description="Inpainting backend. Only 'lama' (ONNX Big-LaMa) is implemented.",
+    )
+
     # --- Pipeline: stage flags (gate which stages 'run-all' executes) ---
     run_panels: bool = True
     run_bubbles: bool = True
