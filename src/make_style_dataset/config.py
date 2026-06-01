@@ -136,6 +136,13 @@ class Settings(BaseSettings):
         description="Inpainting backend. Only 'lama' (ONNX Big-LaMa) is implemented.",
     )
 
+    # --- Pipeline: Stage 4 (clean) ---
+    clean_denoise: bool = Field(
+        default=False,
+        description="Apply a mild JPEG-artifact denoise pass (off by default: it softens "
+        "the line texture a style LoRA should learn).",
+    )
+
     # --- Pipeline: stage flags (gate which stages 'run-all' executes) ---
     run_panels: bool = True
     run_bubbles: bool = True
