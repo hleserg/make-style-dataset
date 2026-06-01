@@ -143,6 +143,18 @@ class Settings(BaseSettings):
         "the line texture a style LoRA should learn).",
     )
 
+    # --- Pipeline: Stage 5 (caption) ---
+    caption_backend: str = Field(
+        default="wd14",
+        description="Captioning backend. Only 'wd14' (WD14 ViT v3 ONNX) is implemented.",
+    )
+    caption_threshold: float = Field(
+        default=0.35,
+        ge=0.0,
+        le=1.0,
+        description="Min WD14 confidence to keep a content tag (0.65-0.75 for 'reliable only').",
+    )
+
     # --- Pipeline: stage flags (gate which stages 'run-all' executes) ---
     run_panels: bool = True
     run_bubbles: bool = True
