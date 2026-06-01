@@ -9,7 +9,9 @@ committed — keep them in ``.env`` (git-ignored) and document keys in
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -43,6 +45,50 @@ class Settings(BaseSettings):
     sentry_environment: str = "development"
     sentry_release: str = ""
     sentry_traces_sample_rate: float = 0.0
+
+    # --- Pipeline: workspace + dataset identity ---
+    workspace: Path = Field(
+        default=Path("workspace"),
+        description="Root directory holding all intermediate and output stage folders.",
+    )
+    trigger_token: str = Field(
+        default="comicstyle",
+        description="LoRA trigger word; also names the kohya training folder.",
+    )
+    dataset_repeats: int = Field(
+        default=10,
+        ge=1,
+        description="kohya repeat count; the dataset folder is named '<repeats>_<trigger>'.",
+    )
+
+    # --- Pipeline: stage thresholds ---
+    min_panel_area: int = Field(
+        default=10_000,
+        ge=0,
+        description="Discard detected panels smaller than this area (px^2).",
+    )
+    dedup_hamming_distance: int = Field(
+        default=6,
+        ge=0,
+        description="Perceptual-hash distance below which two panels are near-duplicates.",
+    )
+    min_side_px: int = Field(
+        default=512,
+        ge=1,
+        description="Drop panels whose shorter side is below this many pixels.",
+    )
+    target_side: int = Field(
+        default=1024,
+        ge=1,
+        description="Target shorter-side length (px) for dataset images.",
+    )
+
+    # --- Pipeline: stage flags (gate which stages 'run-all' executes) ---
+    run_panels: bool = True
+    run_bubbles: bool = True
+    run_inpaint: bool = True
+    run_clean: bool = True
+    run_caption: bool = True
 
 
 @lru_cache(maxsize=1)

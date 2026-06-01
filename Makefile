@@ -1,5 +1,6 @@
 .DEFAULT_GOAL := help
-.PHONY: help install check lint fmt fmt-check type security test test-fast playbook docs clean
+.PHONY: help install check lint fmt fmt-check type security test test-fast playbook docs clean \
+	run-all panels bubbles inpaint clean-stage caption
 
 PY := uv run
 
@@ -35,6 +36,24 @@ test: ## Full test suite with coverage gate
 
 test-fast: ## Unit tests only, parallel, no coverage
 	$(PY) pytest tests/unit -n auto -q
+
+run-all: ## Run the whole pipeline (all enabled stages)
+	$(PY) make-style-dataset run-all
+
+panels: ## Run the panel-detection stage
+	$(PY) make-style-dataset panels
+
+bubbles: ## Run the bubble-detection stage
+	$(PY) make-style-dataset bubbles
+
+inpaint: ## Run the inpainting stage
+	$(PY) make-style-dataset inpaint
+
+clean-stage: ## Run the dedup/size-filter stage (note: `clean` clears caches)
+	$(PY) make-style-dataset clean
+
+caption: ## Run the captioning / dataset-layout stage
+	$(PY) make-style-dataset caption
 
 playbook: ## Extract PLAYBOOK markers
 	$(PY) python scripts/extract_playbook.py

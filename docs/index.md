@@ -1,4 +1,4 @@
-# projectname docs
+# make-style-dataset docs
 
 Start here, then dive into specifics.
 
@@ -6,6 +6,7 @@ Start here, then dive into specifics.
 - **[Development standard](development/DEVELOPMENT_STANDARD.md)** — extended rules.
 - **[PLAYBOOK markers](development/PLAYBOOK_MARKERS.md)** — capturing reusable patterns.
 - **[System overview](architecture/SYSTEM.md)** — high-level architecture.
+- **[Workspace layout](architecture/WORKSPACE.md)** — the stage folder contract.
 - **[ADRs](architecture/ADR/)** — architecture decision records.
 
 ## Sections

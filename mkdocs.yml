@@ -1,5 +1,5 @@
-site_name: projectname
-site_description: TODO project description
+site_name: make-style-dataset
+site_description: Comic pages to kohya-ready style LoRA dataset pipeline
 docs_dir: docs
 theme:
   name: material
@@ -10,6 +10,7 @@ nav:
   - Home: index.md
   - Architecture:
       - Overview: architecture/SYSTEM.md
+      - Workspace layout: architecture/WORKSPACE.md
   - Development:
       - Standard: development/DEVELOPMENT_STANDARD.md
       - PLAYBOOK markers: development/PLAYBOOK_MARKERS.md

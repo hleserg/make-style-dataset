@@ -36,3 +36,6 @@ htmlcov/
 
 # Generated
 /site/
+
+# Pipeline workspace (intermediate folders + dataset output; APP_WORKSPACE)
+/workspace/
