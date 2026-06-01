@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
-.PHONY: help install check lint fmt fmt-check type security test test-fast playbook docs clean \
-	run-all panels bubbles inpaint clean-stage caption
+.PHONY: help install setup init doctor check lint fmt fmt-check type security test test-fast \
+	playbook docs clean run-all panels bubbles inpaint clean-stage caption
 
 PY := uv run
 
@@ -11,6 +11,15 @@ help: ## Show this help
 install: ## Create venv, install deps, set up pre-commit
 	uv sync --all-extras
 	$(PY) pre-commit install
+
+setup: ## One-command first-time setup (deps + workspace + env check)
+	bash scripts/setup.sh
+
+init: ## Scaffold the workspace folders and seed .env
+	$(PY) make-style-dataset init
+
+doctor: ## Check this machine is ready (Python, GPU, workspace)
+	$(PY) make-style-dataset doctor
 
 check: lint fmt-check type security test ## Definition-of-Done gate (run before every PR)
 	@echo "all checks passed"

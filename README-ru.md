@@ -10,6 +10,10 @@
 панелей, маски и инпейнт спич-баблов, дедупликация и фильтр по размеру, затем
 кэптионинг и раскладка финальной папки датасета.
 
+> **Не программист?** Начните с понятной
+> [**пошаговой инструкции**](docs/USER_GUIDE-ru.md) ([EN](docs/USER_GUIDE.md)):
+> одна команда установки (`bash scripts/setup.sh`), положить страницы, запустить.
+
 ---
 
 ## Конвейер
@@ -39,10 +43,20 @@
 
 ## Быстрый старт
 
+**Простой путь** (ставит всё, создаёт воркспейс, проверяет GPU):
+
+```bash
+bash scripts/setup.sh                # установка одной командой; --no-gpu чтобы без GPU-стека
+#   затем положите страницы в workspace/00_pages/
+uv run make-style-dataset run-all    # собрать датасет
+```
+
+**Ручной путь** (для разработчиков):
+
 ```bash
 uv sync --all-extras                 # создать .venv + dev-инструменты (CPU-стадии готовы)
-cp .env.example .env                 # настроить воркспейс/триггер/пороги (опц.)
-uv run make-style-dataset --version
+uv run make-style-dataset init       # создать воркспейс + засеять .env
+uv run make-style-dataset doctor     # проверить Python / GPU / воркспейс
 make check                           # ворота Definition-of-Done
 
 # Для модельных стадий (bubbles/inpaint/caption) добавьте GPU-зависимости:

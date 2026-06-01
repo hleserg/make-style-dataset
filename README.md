@@ -13,6 +13,10 @@ dataset for training a **style** LoRA. The tool runs a linear, file-driven
 pipeline: detect and slice panels, mask and inpaint speech bubbles, deduplicate
 and size-filter, then caption and lay out the final dataset folder.
 
+> **Not a developer?** Start with the plain-language
+> [**step-by-step User Guide**](docs/USER_GUIDE.md) ([RU](docs/USER_GUIDE-ru.md)):
+> one setup command (`bash scripts/setup.sh`), drop pages in, run.
+
 ---
 
 ## Pipeline
@@ -42,10 +46,20 @@ artifacts each stage produced.
 
 ## Quickstart
 
+**The easy way** (installs everything, scaffolds the workspace, checks the GPU):
+
+```bash
+bash scripts/setup.sh                # one-command setup; --no-gpu to skip the GPU stack
+#   then drop pages into workspace/00_pages/
+uv run make-style-dataset run-all    # build the dataset
+```
+
+**The manual way** (developers):
+
 ```bash
 uv sync --all-extras                 # create .venv + dev tools (CPU stages work now)
-cp .env.example .env                 # tune workspace/trigger/thresholds (optional)
-uv run make-style-dataset --version
+uv run make-style-dataset init       # scaffold the workspace + seed .env
+uv run make-style-dataset doctor     # check Python / GPU / workspace are ready
 make check                           # the Definition-of-Done gate
 
 # To run the model stages (bubbles/inpaint/caption), add the GPU deps:
@@ -111,7 +125,10 @@ for the GPU machine is a planned follow-up.
 ## Make targets
 
 ```
+make setup       # one-command first-time setup (deps + workspace + env check)
 make install     # uv sync --all-extras + pre-commit install
+make init        # scaffold the workspace folders + seed .env
+make doctor      # check this machine is ready (Python, GPU, workspace)
 make check       # lint + fmt-check + type + security + tests  (DoD gate)
 make run-all     # run the full pipeline
 make panels      # run a single stage (also: bubbles/inpaint/caption)
