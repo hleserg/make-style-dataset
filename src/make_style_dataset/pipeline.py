@@ -8,10 +8,15 @@ is skipped on re-runs unless ``force`` is set.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from make_style_dataset.config import Settings
 from make_style_dataset.stages import bubbles, caption, clean, inpaint, panels
 from make_style_dataset.stages.base import Stage, StageContext, StageResult
 from make_style_dataset.workspace import Workspace
+
+#: Image suffixes counted per stage folder in the run summary.
+_IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp", ".bmp"})
 
 #: Stages in execution order. Order is load-bearing: each consumes the previous
 #: stage's output directory.
@@ -93,3 +98,37 @@ def run_all(ctx: StageContext, *, force: bool = False) -> list[StageResult]:
             continue
         results.append(run_stage(stage, ctx, force=force))
     return results
+
+
+def _count_images(directory: Path) -> int:
+    """Count image files directly under ``directory`` (0 when it is absent)."""
+    if not directory.is_dir():
+        return 0
+    return sum(
+        1
+        for path in directory.iterdir()
+        if path.is_file() and path.suffix.lower() in _IMAGE_SUFFIXES
+    )
+
+
+def summarize_run(ctx: StageContext) -> str:
+    """Render the end-of-run tally of surviving artifacts in each stage folder.
+
+    Reads the workspace after a run, so it reflects the real on-disk result
+    (including a resumed/partial run), not just this invocation's stages.
+    """
+    ws = ctx.workspace
+    dataset = ws.training_dir(ctx.settings.dataset_repeats, ctx.settings.trigger_token)
+    rows = [
+        ("pages (00_pages)", _count_images(ws.pages)),
+        ("panels (01_panels)", _count_images(ws.panels)),
+        ("masks (02_masks)", _count_images(ws.masks)),
+        ("inpainted (03_inpainted)", _count_images(ws.inpainted)),
+        ("clean (04_clean)", _count_images(ws.clean)),
+        (f"dataset ({dataset.name})", _count_images(dataset)),
+        ("manual_review", _count_images(ws.manual_review)),
+    ]
+    width = max(len(label) for label, _ in rows)
+    lines = ["Pipeline summary:"]
+    lines += [f"  {label:<{width}}  {count}" for label, count in rows]
+    return "\n".join(lines)
