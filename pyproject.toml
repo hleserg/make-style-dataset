@@ -19,6 +19,9 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
+    "numpy>=2.4.6",
+    "opencv-python-headless>=4.13.0.92",
+    "pillow>=12.2.0",
     "pydantic>=2.7",
     "pydantic-settings>=2.3",
     "sentry-sdk>=2.0",
