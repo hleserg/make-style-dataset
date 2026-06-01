@@ -99,6 +99,37 @@ class Settings(BaseSettings):
         description="Target shorter-side length (px) for dataset images.",
     )
 
+    # --- Pipeline: Stage 2 (bubbles) detection + masking ---
+    bubble_model: str = Field(
+        default="kitsumed/yolov8m_seg-speech-bubble",
+        description="YOLOv8-seg weights: a Hugging Face repo id or a local .pt path.",
+    )
+    bubble_confidence: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Minimum YOLOv8 confidence for a speech-bubble detection to count.",
+    )
+    ocr_languages: str = Field(
+        default="en",
+        description="Comma-separated EasyOCR language codes for SFX/text detection (e.g. 'en,ja').",
+    )
+    mask_dilation_px: int = Field(
+        default=5,
+        ge=0,
+        description="Dilate the bubble+text mask by this many px to catch outlines/letter strokes.",
+    )
+    max_mask_coverage: float = Field(
+        default=0.6,
+        gt=0.0,
+        le=1.0,
+        description="Panels whose mask covers more than this fraction go to manual_review.",
+    )
+    bubbles_debug: bool = Field(
+        default=False,
+        description="Also write a mask/panel overlay to manual_review for visual inspection.",
+    )
+
     # --- Pipeline: stage flags (gate which stages 'run-all' executes) ---
     run_panels: bool = True
     run_bubbles: bool = True
