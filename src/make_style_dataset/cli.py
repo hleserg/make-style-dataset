@@ -14,7 +14,7 @@ from pathlib import Path
 from make_style_dataset import __version__
 from make_style_dataset.config import get_settings
 from make_style_dataset.observability import init_sentry
-from make_style_dataset.pipeline import STAGES, make_context, run_all, run_single
+from make_style_dataset.pipeline import STAGES, make_context, run_all, run_single, summarize_run
 from make_style_dataset.stages.base import StageContext, StageResult
 
 
@@ -83,6 +83,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "run-all":
         print("Running pipeline:")
         _print_results(run_all(ctx, force=args.force))
+        print(summarize_run(ctx))
     else:
         print(f"Running stage '{args.command}':")
         _print_results([run_single(args.command, ctx, force=args.force)])

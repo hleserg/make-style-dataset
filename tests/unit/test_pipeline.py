@@ -4,16 +4,20 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from PIL import Image
+
 from make_style_dataset.config import Settings
 from make_style_dataset.pipeline import (
     DONE_MARKER,
     STAGE_BY_NAME,
     STAGES,
+    _count_images,
     make_context,
     run_all,
     run_single,
     run_stage,
     stage_names,
+    summarize_run,
 )
 from make_style_dataset.stages.base import StageContext
 from make_style_dataset.workspace import Workspace
@@ -82,3 +86,39 @@ def test_run_stage_accepts_stage_object(tmp_path: Path) -> None:
     ctx = _context(tmp_path)
     result = run_stage(STAGES[0], ctx)
     assert result.name == "panels"
+
+
+# --- run summary ----------------------------------------------------------
+
+
+def _png(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (8, 8), "white").save(path)
+
+
+def test_count_images(tmp_path: Path) -> None:
+    _png(tmp_path / "a.png")
+    _png(tmp_path / "b.jpg")
+    (tmp_path / "note.txt").write_text("x", encoding="utf-8")
+    assert _count_images(tmp_path) == 2
+    assert _count_images(tmp_path / "missing") == 0  # absent dir -> 0
+
+
+def test_summarize_run_tallies_each_stage(tmp_path: Path) -> None:
+    ctx = _context(tmp_path, dataset_repeats=10, trigger_token="mystyle")
+    ws = ctx.workspace
+    _png(ws.pages / "p1.png")
+    _png(ws.pages / "p2.png")
+    _png(ws.panels / "p1_00.png")
+    _png(ws.manual_review / "p2.png")
+    _png(ws.training_dir(10, "mystyle") / "p1_00.png")
+
+    report = summarize_run(ctx)
+    assert "Pipeline summary:" in report
+    assert "pages (00_pages)" in report and "  2" in report
+    assert "dataset (10_mystyle)" in report
+    # the dataset folder has exactly one image
+    dataset_line = next(line for line in report.splitlines() if "dataset (10_mystyle)" in line)
+    assert dataset_line.strip().endswith(" 1")
+    manual_line = next(line for line in report.splitlines() if "manual_review" in line)
+    assert manual_line.strip().endswith(" 1")
