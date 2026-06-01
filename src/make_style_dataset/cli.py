@@ -12,10 +12,17 @@ import sys
 from pathlib import Path
 
 from make_style_dataset import __version__
-from make_style_dataset.config import get_settings
+from make_style_dataset.config import Settings, get_settings
 from make_style_dataset.observability import init_sentry
+from make_style_dataset.onboarding import (
+    format_doctor_report,
+    format_init_report,
+    gather_checks,
+    initialize_workspace,
+)
 from make_style_dataset.pipeline import STAGES, make_context, run_all, run_single, summarize_run
 from make_style_dataset.stages.base import StageContext, StageResult
+from make_style_dataset.workspace import Workspace
 
 
 def _add_common(parser: argparse.ArgumentParser) -> None:
@@ -35,6 +42,24 @@ def build_parser() -> argparse.ArgumentParser:
         "-v", "--version", action="version", version=f"make-style-dataset {__version__}"
     )
     sub = parser.add_subparsers(dest="command", metavar="<stage>")
+
+    init_parser = sub.add_parser(
+        "init",
+        help="Scaffold the workspace folders and seed .env (run this first).",
+        description="Create the input/review folders and seed .env from the template.",
+    )
+    init_parser.add_argument(
+        "--workspace", type=Path, help="Override the workspace root directory."
+    )
+
+    doctor_parser = sub.add_parser(
+        "doctor",
+        help="Check that this machine is ready (Python, GPU, workspace).",
+        description="Diagnose the environment: interpreter, venv, .env, workspace, GPU stack.",
+    )
+    doctor_parser.add_argument(
+        "--workspace", type=Path, help="Override the workspace root directory."
+    )
 
     for stage in STAGES:
         stage_parser = sub.add_parser(stage.name, help=stage.summary, description=stage.summary)
@@ -60,12 +85,16 @@ def _print_results(results: list[StageResult]) -> None:
             print(f"  - {result.name}: ok -> {result.output_dir} ({result.produced} produced)")
 
 
-def _resolve_context(args: argparse.Namespace) -> StageContext:
+def _resolve_settings(args: argparse.Namespace) -> Settings:
     get_settings.cache_clear()
     settings = get_settings()
     if args.workspace is not None:
         settings = settings.model_copy(update={"workspace": args.workspace})
-    return make_context(settings)
+    return settings
+
+
+def _resolve_context(args: argparse.Namespace) -> StageContext:
+    return make_context(_resolve_settings(args))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -78,8 +107,18 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     init_sentry()
-    ctx = _resolve_context(args)
 
+    if args.command in ("doctor", "init"):
+        # Build the workspace WITHOUT make_context's ensure_base(): doctor must
+        # stay read-only, and init must do (and truthfully report) the creating.
+        workspace = Workspace(root=_resolve_settings(args).workspace)
+        if args.command == "doctor":
+            print(format_doctor_report(gather_checks(workspace)))
+        else:
+            print(format_init_report(initialize_workspace(workspace), workspace))
+        return 0
+
+    ctx = _resolve_context(args)
     if args.command == "run-all":
         print("Running pipeline:")
         _print_results(run_all(ctx, force=args.force))
