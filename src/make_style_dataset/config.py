@@ -67,6 +67,22 @@ class Settings(BaseSettings):
         ge=0,
         description="Discard detected panels smaller than this area (px^2).",
     )
+    panel_border: int = Field(
+        default=8,
+        ge=0,
+        description="Pixels trimmed off each side of a detected panel to drop frame/gutters.",
+    )
+    max_panels: int = Field(
+        default=12,
+        ge=1,
+        description="Pages with more panels than this go to manual_review (bad segmentation).",
+    )
+    splash_area_ratio: float = Field(
+        default=0.85,
+        gt=0.0,
+        le=1.0,
+        description="A lone panel covering at least this fraction of the page is a splash.",
+    )
     dedup_hamming_distance: int = Field(
         default=6,
         ge=0,
