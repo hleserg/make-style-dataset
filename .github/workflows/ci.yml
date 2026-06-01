@@ -19,6 +19,11 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.12", "3.13"]
+    env:
+      # Pin every uv command (sync AND run) to the matrix interpreter. Without
+      # this, `.python-version` (3.12) overrides the matrix on `uv run`, which
+      # rebuilds the venv without dev extras and breaks the lint/type steps.
+      UV_PYTHON: ${{ matrix.python-version }}
     steps:
       - uses: actions/checkout@v4
       - name: Install uv

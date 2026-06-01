@@ -1,0 +1,93 @@
+"""Command-line entry point for the style-dataset pipeline.
+
+Thin argparse shell: one subcommand per pipeline stage plus ``run-all``. All
+real logic lives in importable, tested modules (:mod:`make_style_dataset.pipeline`
+and :mod:`make_style_dataset.stages`); this file is excluded from coverage.
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+from make_style_dataset import __version__
+from make_style_dataset.config import get_settings
+from make_style_dataset.observability import init_sentry
+from make_style_dataset.pipeline import STAGES, make_context, run_all, run_single
+from make_style_dataset.stages.base import StageContext, StageResult
+
+
+def _add_common(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--workspace", type=Path, help="Override the workspace root directory.")
+    parser.add_argument(
+        "--force", action="store_true", help="Rerun even if the stage is already complete."
+    )
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build the argparse CLI: a subcommand per stage plus ``run-all``."""
+    parser = argparse.ArgumentParser(
+        prog="make-style-dataset",
+        description="Comic pages -> kohya-ready style LoRA dataset pipeline.",
+    )
+    parser.add_argument(
+        "-v", "--version", action="version", version=f"make-style-dataset {__version__}"
+    )
+    sub = parser.add_subparsers(dest="command", metavar="<stage>")
+
+    for stage in STAGES:
+        stage_parser = sub.add_parser(stage.name, help=stage.summary, description=stage.summary)
+        _add_common(stage_parser)
+
+    stage_list = ", ".join(stage.name for stage in STAGES)
+    run_all_parser = sub.add_parser(
+        "run-all",
+        help="Run the whole pipeline in order.",
+        description=f"Run every enabled stage in order: {stage_list}.",
+        epilog=f"Stages: {stage_list}",
+    )
+    _add_common(run_all_parser)
+
+    return parser
+
+
+def _print_results(results: list[StageResult]) -> None:
+    for result in results:
+        if result.skipped:
+            print(f"  - {result.name}: skipped ({result.reason})")
+        else:
+            print(f"  - {result.name}: ok -> {result.output_dir} ({result.produced} produced)")
+
+
+def _resolve_context(args: argparse.Namespace) -> StageContext:
+    get_settings.cache_clear()
+    settings = get_settings()
+    if args.workspace is not None:
+        settings = settings.model_copy(update={"workspace": args.workspace})
+    return make_context(settings)
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Run the CLI. Returns a process exit code."""
+    parser = build_parser()
+    args = parser.parse_args(sys.argv[1:] if argv is None else argv)
+
+    if args.command is None:
+        parser.print_help()
+        return 0
+
+    init_sentry()
+    ctx = _resolve_context(args)
+
+    if args.command == "run-all":
+        print("Running pipeline:")
+        _print_results(run_all(ctx, force=args.force))
+    else:
+        print(f"Running stage '{args.command}':")
+        _print_results([run_single(args.command, ctx, force=args.force)])
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

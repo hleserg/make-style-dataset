@@ -1,10 +1,12 @@
-"""Tests for projectname.config."""
+"""Tests for make_style_dataset.config."""
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
-from projectname.config import Settings, get_settings
+from make_style_dataset.config import Settings, get_settings
 
 
 def test_defaults() -> None:
@@ -13,6 +15,33 @@ def test_defaults() -> None:
     assert settings.environment == "development"
     assert settings.debug is False
     assert settings.sentry_dsn == ""
+
+
+def test_pipeline_defaults() -> None:
+    settings = get_settings()
+    assert settings.workspace == Path("workspace")
+    assert settings.trigger_token == "comicstyle"
+    assert settings.dataset_repeats == 10
+    assert settings.min_panel_area == 10_000
+    assert settings.dedup_hamming_distance == 6
+    assert settings.min_side_px == 512
+    assert settings.target_side == 1024
+    assert settings.run_panels is True
+    assert settings.run_caption is True
+
+
+def test_reads_pipeline_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APP_WORKSPACE", "/tmp/ws")
+    monkeypatch.setenv("APP_TRIGGER_TOKEN", "mystyle")
+    monkeypatch.setenv("APP_MIN_SIDE_PX", "256")
+    monkeypatch.setenv("APP_RUN_BUBBLES", "false")
+    get_settings.cache_clear()
+
+    settings = get_settings()
+    assert settings.workspace == Path("/tmp/ws")
+    assert settings.trigger_token == "mystyle"
+    assert settings.min_side_px == 256
+    assert settings.run_bubbles is False
 
 
 def test_singleton_is_cached() -> None:

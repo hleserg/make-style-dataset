@@ -7,8 +7,14 @@ non-inferable facts. Style rules live in linters; deep detail lives in
 
 ## Overview
 
-TODO: one paragraph — what this project does and its single most important
-constraint. Replace before first real work.
+`make-style-dataset` turns comic pages into a kohya-ready **style** LoRA
+dataset via a six-stage, file-driven pipeline (pages → panels → bubbles →
+inpaint → clean → caption). Each stage reads one workspace folder and writes
+the next; the runner is **idempotent** (a `.stage_complete` marker skips done
+work unless `--force`). The single most important constraint: stages must stay
+resumable and side-effect-contained to their own output folder — never mutate a
+previous stage's output. See `docs/architecture/SYSTEM.md` and
+`docs/architecture/WORKSPACE.md`.
 
 ## Stack
 
@@ -42,7 +48,7 @@ Also required:
   sensitive data — never weaken scrubbing or log raw user input.
 - **Secrets only in `.env`** (git-ignored). Document new keys in `.env.example`.
   Never hardcode credentials; never read `os.environ` directly — use
-  `projectname.config.get_settings()`.
+  `make_style_dataset.config.get_settings()`.
 - **Conventional Commits** (`feat:`, `fix:`, `feat!:` …). Commits/comments in
   English. Versioning via Commitizen.
 - **Docs are English-canonical**; user-facing docs add an `-ru.md` pair, edited
@@ -68,9 +74,9 @@ Spec: `docs/development/PLAYBOOK_MARKERS.md`. When unsure, add one with
 
 | Path | What |
 |------|------|
-| `src/projectname/` | the package |
-| `src/projectname/config.py` | typed settings (env access lives here only) |
-| `src/projectname/observability/` | Sentry init + component tagging |
+| `src/make_style_dataset/` | the package |
+| `src/make_style_dataset/config.py` | typed settings (env access lives here only) |
+| `src/make_style_dataset/observability/` | Sentry init + component tagging |
 | `tests/{unit,integration}/` | tests |
 | `docs/` | architecture (ADRs), dev standard, PLAYBOOK spec |
 | `scripts/` | `init_template.py`, `extract_playbook.py` |
