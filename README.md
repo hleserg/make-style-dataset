@@ -34,17 +34,23 @@ skipped on re-runs unless `--force`. See the
 [workspace layout contract](docs/architecture/WORKSPACE.md) and the
 [system overview](docs/architecture/SYSTEM.md).
 
-> **Status:** S0 scaffold — stage internals are stubs that create their output
-> folders; the algorithms land in the per-stage issues.
+All six stages are implemented. `panels` and `clean` are CPU-only; the model
+stages — `bubbles` (YOLOv8-seg + EasyOCR), `inpaint` (ONNX Big-LaMa) and
+`caption` (WD14 ViT v3, ONNX) — need the optional **`gpu`** dependency group
+(see [GPU stages](#gpu-stages)). `run-all` prints a summary of how many
+artifacts each stage produced.
 
 ## Quickstart
 
 ```bash
-uv sync --all-extras                 # create .venv and install everything
+uv sync --all-extras                 # create .venv + dev tools (CPU stages work now)
 cp .env.example .env                 # tune workspace/trigger/thresholds (optional)
 uv run make-style-dataset --version
-uv run make-style-dataset run-all    # run the whole pipeline
 make check                           # the Definition-of-Done gate
+
+# To run the model stages (bubbles/inpaint/caption), add the GPU deps:
+uv sync --all-extras --group gpu     # torch (cu128) + onnxruntime + ultralytics/easyocr (multi-GB)
+uv run make-style-dataset run-all    # run the whole pipeline
 ```
 
 ## Usage
@@ -62,8 +68,32 @@ uv run make-style-dataset clean --force                      # rerun a completed
 
 Configuration is environment-driven (`APP_` prefix, see `.env.example`):
 workspace root, trigger token, kohya repeat count, thresholds (`min_panel_area`,
-`dedup_hamming_distance`, `min_side_px`, `target_side`), and per-stage enable
-flags (`APP_RUN_*`) that gate `run-all`.
+`dedup_hamming_distance`, `min_side_px`, `target_side`), backend selectors
+(`inpaint_backend`, `caption_backend`), and per-stage enable flags (`APP_RUN_*`)
+that gate `run-all`.
+
+## GPU stages
+
+The model stages download their weights from Hugging Face (pinned by commit) on
+first use and run on the GPU when available:
+
+| Stage | Model | Backend |
+|-------|-------|---------|
+| `bubbles` | `kitsumed/yolov8m_seg-speech-bubble` + EasyOCR | ultralytics (torch, cu128) |
+| `inpaint` | `Carve/LaMa-ONNX` (Big-LaMa) | onnxruntime |
+| `caption` | `SmilingWolf/wd-vit-tagger-v3` | onnxruntime |
+
+Install them with `uv sync --all-extras --group gpu`. They live in a PEP 735
+**dependency-group** (not an extra), so the default `uv sync --all-extras` —
+used by CI and the CPU-only stages — stays lightweight. The CUDA build of torch
+(`cu128`, for Blackwell/RTX 50xx) is pinned via `[tool.uv.sources]`; on macOS the
+lockfile falls back to the CPU build. onnxruntime falls back to CPU if its CUDA
+libs aren't found (the bare pip wheels don't ship cuDNN/`libcublasLt` — a CUDA
+base image or a local CUDA/cuDNN install provides them).
+
+**Hardware split:** run `panels`/`clean` (CPU) anywhere; run
+`bubbles`/`inpaint`/`caption` on the GPU host. Containerizing the heavy stages
+for the GPU machine is a planned follow-up.
 
 ## Project layout
 
