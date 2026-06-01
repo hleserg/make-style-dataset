@@ -49,6 +49,42 @@ Issues = "https://github.com/hleserg/make-style-dataset/issues"
 [project.scripts]
 make-style-dataset = "make_style_dataset.cli:main"
 
+[dependency-groups]
+# GPU/ML stack for the model stages (S2 bubbles now; S3 inpaint, S5 caption
+# later). Deliberately a PEP 735 dependency-group, NOT a
+# [project.optional-dependencies] extra: the documented `uv sync --all-extras`
+# (CI and fresh-clone setup) installs extras but NOT groups, so the CPU-only
+# stages and the `make check` gate stay fast and `pip-audit` never scans this
+# heavy tree. Install locally with `uv sync --group gpu`. The group is still
+# resolved and pinned in uv.lock across every platform.
+gpu = [
+    "torch>=2.7",
+    "torchvision>=0.22",
+    "ultralytics>=8.3",
+    "easyocr>=1.7",
+    "huggingface-hub>=0.24",
+]
+
+# CUDA wheels for torch/torchvision. cu128 carries Blackwell (sm_120, RTX 50xx)
+# kernels — verified on this box's GPU (capability 12.0, arch_list includes
+# sm_120). `explicit = true` means this index is used ONLY for packages mapped
+# to it in [tool.uv.sources]; everything else still resolves from PyPI.
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+# Pull torch/torchvision from the CUDA index on Linux/Windows only. macOS has no
+# CUDA wheels; with no marker match there, resolution falls back to the PyPI CPU
+# build, which keeps `uv lock` resolvable on every platform (OS-agnostic).
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cu128", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
+torchvision = [
+    { index = "pytorch-cu128", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/make_style_dataset"]
 
