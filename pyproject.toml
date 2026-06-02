@@ -124,6 +124,10 @@ include = ["src", "tests"]
 typeCheckingMode = "standard"
 pythonVersion = "3.12"
 reportMissingTypeStubs = false
+# Libraries often re-export their public API without __all__ (e.g. ultralytics'
+# YOLO, the documented entry point); pyright flags that as a private import only
+# when the optional 'gpu' group is installed. Off to keep the gate env-agnostic.
+reportPrivateImportUsage = false
 
 [tool.pytest.ini_options]
 minversion = "8.0"

@@ -338,6 +338,7 @@ def test_promote_to_clean_rescues_upscales_and_invalidates_caption(tmp_path: Pat
     out = ws.clean / "panel_00.png"
     assert out.is_file()
     rescued = cv2.imdecode(np.fromfile(out, np.uint8), cv2.IMREAD_COLOR)
+    assert rescued is not None
     assert min(rescued.shape[:2]) == 16  # upscaled to target_side
     assert not keep.is_file()  # moved out of manual_review
     assert not (review / "panel_00.reason.txt").is_file()
