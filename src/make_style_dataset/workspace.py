@@ -14,6 +14,7 @@ Layout::
       03_inpainted/          panels with bubbles inpainted away
       04_clean/              deduplicated, size-filtered panels
       05_dataset/<N>_<trig>/  kohya-ready images + caption sidecars
+      06_lora/               trained style-LoRA weights (.safetensors) + logs
       manual_review/         anything kicked out for a human to inspect
 """
 
@@ -71,6 +72,11 @@ class Workspace:
     def dataset(self) -> Path:
         """Root of the kohya-ready dataset output."""
         return self.root / "05_dataset"
+
+    @property
+    def lora(self) -> Path:
+        """Trained style-LoRA weights (.safetensors) + training logs (stage 6)."""
+        return self.root / "06_lora"
 
     @property
     def manual_review(self) -> Path:

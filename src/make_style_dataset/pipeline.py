@@ -12,18 +12,21 @@ from pathlib import Path
 
 from make_style_dataset.config import Settings
 from make_style_dataset.media import image_files
-from make_style_dataset.stages import bubbles, caption, clean, inpaint, panels
+from make_style_dataset.stages import bubbles, caption, clean, inpaint, panels, train
 from make_style_dataset.stages.base import Stage, StageContext, StageResult
 from make_style_dataset.workspace import Workspace
 
 #: Stages in execution order. Order is load-bearing: each consumes the previous
-#: stage's output directory.
+#: stage's output directory. ``train`` is last and gated off by default
+#: (``run_train=False``), so ``run-all`` stays the dataset pipeline; run it
+#: explicitly with ``make-style-dataset train``.
 STAGES: tuple[Stage, ...] = (
     panels.STAGE,
     bubbles.STAGE,
     inpaint.STAGE,
     clean.STAGE,
     caption.STAGE,
+    train.STAGE,
 )
 
 STAGE_BY_NAME: dict[str, Stage] = {stage.name: stage for stage in STAGES}

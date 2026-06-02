@@ -29,9 +29,9 @@ def _context(tmp_path: Path, **overrides: object) -> StageContext:
 
 
 def test_stage_order_and_names() -> None:
-    assert stage_names() == ["panels", "bubbles", "inpaint", "clean", "caption"]
+    assert stage_names() == ["panels", "bubbles", "inpaint", "clean", "caption", "train"]
     assert list(STAGE_BY_NAME) == stage_names()
-    assert len(STAGES) == 5
+    assert len(STAGES) == 6
 
 
 def test_make_context_creates_base_dirs(tmp_path: Path) -> None:
@@ -68,9 +68,18 @@ def test_run_all_runs_every_enabled_stage(tmp_path: Path) -> None:
     ctx = _context(tmp_path)
     results = run_all(ctx)
     assert [r.name for r in results] == stage_names()
-    assert all(not r.skipped for r in results)
+    # The dataset stages run on an empty workspace (producing 0); the heavy
+    # train stage is gated off by default (run_train=False), so it is skipped
+    # and its 06_lora output dir is never created.
+    dataset_results = [r for r in results if r.name != "train"]
+    assert all(not r.skipped for r in dataset_results)
     for stage in STAGES:
+        if stage.name == "train":
+            continue
         assert stage.output(ctx.workspace, ctx.settings).is_dir()
+    train_result = next(r for r in results if r.name == "train")
+    assert train_result.skipped is True
+    assert "run_train" in train_result.reason
 
 
 def test_run_all_skips_disabled_stage(tmp_path: Path) -> None:
