@@ -4,8 +4,8 @@ Reads the kohya dataset folder ``05_dataset/<repeats>_<trigger>/`` and trains a
 style LoRA into ``06_lora/<name>.safetensors`` by shelling out to a local clone
 of kohya **sd-scripts**. The entrypoint is chosen by ``train_model_type``:
 ``train_network.py`` (SD 1.5), ``sdxl_train_network.py`` (SDXL) or
-``flux_train_network.py`` (Flux). This module wires **SD 1.5** end-to-end; the
-SDXL and Flux argument branches land in later subtasks.
+``flux_train_network.py`` (Flux). This module wires **SD 1.5** and **SDXL**
+end-to-end; the Flux argument branch lands in a later subtask.
 
 Pure-core-lazy-backend (shared with ``caption.py``/``inpaint.py``): the dataset
 ``--dataset_config`` TOML builder, the argument builder and the stdout progress
@@ -44,8 +44,8 @@ ENTRYPOINTS: dict[str, tuple[str, str]] = {
     "flux": ("flux_train_network.py", "networks.lora_flux"),
 }
 
-#: Families with their ``build_train_args`` branch wired. sdxl/flux land in [T1]/[T2].
-SUPPORTED_MODEL_TYPES = frozenset({"sd15"})
+#: Families with their ``build_train_args`` branch wired. flux lands in [T2].
+SUPPORTED_MODEL_TYPES = frozenset({"sd15", "sdxl"})
 
 #: ``epoch 1/10`` banner (kohya prints it on stdout between epochs).
 _EPOCH_RE = re.compile(r"^epoch (\d+)/(\d+)")
@@ -240,15 +240,15 @@ def build_train_args(
 ) -> list[str]:
     """Build the sd-scripts script arguments (appended after the entrypoint).
 
-    Covers the flags common to every family plus the SD 1.5 specifics. Raises
-    :class:`NotImplementedError` for sdxl/flux (wired in [T1]/[T2]) and
+    Covers the flags common to every family plus the SD 1.5 and SDXL specifics.
+    Raises :class:`NotImplementedError` for flux (wired in [T2]) and
     :class:`ValueError` when the base checkpoint is unset.
     """
     model_type = settings.train_model_type.strip().lower()
     if model_type not in SUPPORTED_MODEL_TYPES:
         raise NotImplementedError(
             f"train_model_type={model_type!r} is not wired yet; "
-            f"set APP_TRAIN_MODEL_TYPE=sd15 (sdxl/flux land in [T1]/[T2])."
+            f"set APP_TRAIN_MODEL_TYPE to sd15 or sdxl (flux lands in [T2])."
         )
     if not settings.train_base_model:
         raise ValueError(
@@ -286,6 +286,19 @@ def build_train_args(
         args.append("--log_with=tensorboard")
     if model_type == "sd15":
         args.append(f"--clip_skip={settings.train_clip_skip}")
+    elif model_type == "sdxl":
+        # SDXL VAE produces NaN/black latents in fp16/bf16 -> always keep it fp32.
+        args.append("--no_half_vae")
+        if settings.train_unet_only:
+            # Unet-only fits 16 GB; text-encoder-output caching REQUIRES it
+            # (kohya asserts the pair) and needs shuffle_caption off (our TOML sets it).
+            args.append("--network_train_unet_only")
+            args.append("--cache_text_encoder_outputs")
+            args.append("--cache_text_encoder_outputs_to_disk")
+        elif settings.train_text_encoder_lr is not None:
+            # Train both text encoders; --text_encoder_lr is nargs=* (two values).
+            lr = str(settings.train_text_encoder_lr)
+            args.extend(["--text_encoder_lr", lr, lr])
     return args
 
 

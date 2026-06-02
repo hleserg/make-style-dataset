@@ -229,6 +229,16 @@ class Settings(BaseSettings):
         ge=1,
         description="CLIP skip (SD 1.5 only; anime/comic convention is 2). Ignored on SDXL/Flux.",
     )
+    train_unet_only: bool = Field(
+        default=True,
+        description="SDXL/Flux: train only the U-Net/DiT LoRA (VRAM-safe; text encoders left "
+        "untrained). False also trains the text encoders (more VRAM, disables TE-output caching).",
+    )
+    train_text_encoder_lr: float | None = Field(
+        default=None,
+        description="SDXL: learning rate for both text encoders when train_unet_only is False. "
+        "None falls back to the main learning_rate.",
+    )
 
     # --- Local web UI (S8) ---
     ui_host: str = Field(
