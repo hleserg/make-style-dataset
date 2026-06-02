@@ -118,9 +118,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.command in ("doctor", "init"):
         # Build the workspace WITHOUT make_context's ensure_base(): doctor must
         # stay read-only, and init must do (and truthfully report) the creating.
-        workspace = Workspace(root=_resolve_settings(args).workspace)
+        settings = _resolve_settings(args)
+        workspace = Workspace(root=settings.workspace)
         if args.command == "doctor":
-            print(format_doctor_report(gather_checks(workspace)))
+            print(format_doctor_report(gather_checks(workspace, settings=settings)))
         else:
             print(format_init_report(initialize_workspace(workspace), workspace))
         return 0

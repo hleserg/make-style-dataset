@@ -19,9 +19,13 @@ import sys
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from make_style_dataset.media import image_files
 from make_style_dataset.workspace import Workspace
+
+if TYPE_CHECKING:
+    from make_style_dataset.config import Settings
 
 #: Default location of the committed template env file (relative to the cwd).
 DEFAULT_ENV_EXAMPLE = Path(".env.example")
@@ -173,16 +177,95 @@ def probe_env(env_path: Path) -> Check:
     return Check("config (.env)", True, "present" if exists else "absent (using built-in defaults)")
 
 
+# --- training-env probes (stage 6) ----------------------------------------
+
+#: A training-interpreter probe takes Settings and returns one Check. Injected +
+#: ``pragma: no cover`` like the GPU probes: it spawns the *separate* trainer venv.
+TrainProbe = Callable[["Settings"], Check]
+
+
+def _probe_model_path(name: str, value: str, env: str) -> Check:
+    """A Check for a model-file setting: set, and present on disk."""
+    if not value:
+        return Check(name, False, f"{env} not set")
+    exists = Path(value).exists()
+    return Check(name, exists, value if exists else f"{value} not found")
+
+
+def probe_train_paths(settings: Settings) -> list[Check]:
+    """Check the sd-scripts clone, its entrypoint, and the base/Flux model paths."""
+    from make_style_dataset.stages.train import ENTRYPOINTS
+
+    checks: list[Check] = []
+    model_type = settings.train_model_type.strip().lower()
+    scripts_dir = settings.train_sd_scripts_dir
+    entry = ENTRYPOINTS.get(model_type)
+    if not scripts_dir.is_dir():
+        checks.append(
+            Check("sd-scripts", False, f"{scripts_dir} missing (clone kohya sd-scripts there)")
+        )
+    elif entry is None:
+        checks.append(Check("sd-scripts", False, f"unknown APP_TRAIN_MODEL_TYPE={model_type!r}"))
+    else:
+        entrypoint = scripts_dir / entry[0]
+        ok = entrypoint.is_file()
+        checks.append(Check("sd-scripts", ok, str(entrypoint) if ok else f"{entrypoint} missing"))
+
+    checks.append(
+        _probe_model_path("base model", settings.train_base_model, "APP_TRAIN_BASE_MODEL")
+    )
+    if model_type == "flux":
+        checks.append(
+            _probe_model_path("flux clip_l", settings.train_flux_clip_l, "APP_TRAIN_FLUX_CLIP_L")
+        )
+        checks.append(
+            _probe_model_path("flux t5xxl", settings.train_flux_t5xxl, "APP_TRAIN_FLUX_T5XXL")
+        )
+        checks.append(_probe_model_path("flux ae", settings.train_flux_ae, "APP_TRAIN_FLUX_AE"))
+    return checks
+
+
+def probe_train_python(settings: Settings) -> Check:  # pragma: no cover - spawns the trainer venv
+    """Check the trainer interpreter carries a Blackwell-capable (sm_120) torch."""
+    import subprocess  # nosec B404 - fixed list-form command, shell=False
+
+    from make_style_dataset.stages.train import resolve_python
+
+    python = resolve_python(settings)
+    code = "import torch; print(';'.join(torch.cuda.get_arch_list()))"
+    try:
+        result = subprocess.run(  # nosec B603 - interpreter path from settings, no shell
+            [python, "-c", code], capture_output=True, text=True, timeout=120, check=False
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return Check("trainer torch", False, f"{python}: {exc}")
+    if result.returncode != 0:
+        return Check("trainer torch", False, f"{python}: torch import failed")
+    archs = result.stdout.strip()
+    ok = "sm_120" in archs.split(";")
+    detail = f"arch_list={archs}" if ok else f"arch_list={archs} (no sm_120 — wrong torch build!)"
+    return Check("trainer torch", ok, detail)
+
+
 def gather_checks(
     workspace: Workspace,
     *,
     env_path: Path = DEFAULT_ENV_PATH,
     gpu_probes: Sequence[GpuProbe] = (probe_torch, probe_onnxruntime),
+    settings: Settings | None = None,
+    train_python_probe: TrainProbe = probe_train_python,
 ) -> list[Check]:
-    """Collect every diagnostic into an ordered list of :class:`Check`."""
+    """Collect every diagnostic into an ordered list of :class:`Check`.
+
+    When ``settings`` is given, the stage-6 training-env checks are appended (the
+    sd-scripts clone, model paths, and the trainer interpreter's ``sm_120`` torch).
+    """
     checks = [probe_python(), probe_venv(), probe_env(env_path)]
     checks += probe_workspace(workspace)
     checks += [probe() for probe in gpu_probes]
+    if settings is not None:
+        checks += probe_train_paths(settings)
+        checks.append(train_python_probe(settings))
     return checks
 
 
