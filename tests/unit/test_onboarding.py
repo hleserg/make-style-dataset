@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from make_style_dataset.config import Settings
 from make_style_dataset.onboarding import (
     Check,
     format_doctor_report,
@@ -12,6 +13,7 @@ from make_style_dataset.onboarding import (
     initialize_workspace,
     probe_env,
     probe_python,
+    probe_train_paths,
     probe_venv,
     probe_workspace,
 )
@@ -20,6 +22,20 @@ from make_style_dataset.workspace import Workspace
 
 def _ws(tmp_path: Path) -> Workspace:
     return Workspace(root=tmp_path / "ws")
+
+
+def _settings(tmp_path: Path, **overrides: object) -> Settings:
+    base: dict[str, object] = {"workspace": tmp_path / "ws"}
+    base.update(overrides)
+    return Settings(**base)  # type: ignore[arg-type]
+
+
+def _sd_scripts(tmp_path: Path, entrypoint: str = "train_network.py") -> Path:
+    """A fake sd-scripts clone containing one entrypoint."""
+    scripts = tmp_path / "sd-scripts"
+    scripts.mkdir(exist_ok=True)
+    (scripts / entrypoint).write_text("x", encoding="utf-8")
+    return scripts
 
 
 # --- init ------------------------------------------------------------------
@@ -163,6 +179,93 @@ def test_gather_checks_uses_injected_gpu_probes(tmp_path: Path) -> None:
         "torch / CUDA",
         "onnxruntime",
     ]
+
+
+# --- training-env probes (stage 6) ----------------------------------------
+
+
+def test_probe_train_paths_missing_sd_scripts(tmp_path: Path) -> None:
+    settings = _settings(tmp_path, train_sd_scripts_dir=tmp_path / "absent")
+    checks = {c.name: c for c in probe_train_paths(settings)}
+    assert checks["sd-scripts"].ok is False
+    assert "missing" in checks["sd-scripts"].detail
+
+
+def test_probe_train_paths_ok_sd15(tmp_path: Path) -> None:
+    scripts = _sd_scripts(tmp_path)
+    model = tmp_path / "base.safetensors"
+    model.write_bytes(b"x")
+    settings = _settings(tmp_path, train_sd_scripts_dir=scripts, train_base_model=str(model))
+    checks = {c.name: c for c in probe_train_paths(settings)}
+    assert checks["sd-scripts"].ok is True
+    assert checks["base model"].ok is True
+
+
+def test_probe_train_paths_entrypoint_missing(tmp_path: Path) -> None:
+    scripts = tmp_path / "sd-scripts"
+    scripts.mkdir()  # dir exists but has no train_network.py
+    settings = _settings(tmp_path, train_sd_scripts_dir=scripts)
+    sd = next(c for c in probe_train_paths(settings) if c.name == "sd-scripts")
+    assert sd.ok is False and "missing" in sd.detail
+
+
+def test_probe_train_paths_unknown_model_type(tmp_path: Path) -> None:
+    settings = _settings(
+        tmp_path, train_sd_scripts_dir=_sd_scripts(tmp_path), train_model_type="sd3"
+    )
+    sd = next(c for c in probe_train_paths(settings) if c.name == "sd-scripts")
+    assert sd.ok is False and "unknown" in sd.detail.lower()
+
+
+def test_probe_train_paths_base_model_unset_and_missing(tmp_path: Path) -> None:
+    scripts = _sd_scripts(tmp_path)
+    base_unset = next(
+        c
+        for c in probe_train_paths(_settings(tmp_path, train_sd_scripts_dir=scripts))
+        if c.name == "base model"
+    )
+    assert base_unset.ok is False and "not set" in base_unset.detail
+    ghost = _settings(
+        tmp_path, train_sd_scripts_dir=scripts, train_base_model=str(tmp_path / "ghost.safetensors")
+    )
+    base_missing = next(c for c in probe_train_paths(ghost) if c.name == "base model")
+    assert base_missing.ok is False and "not found" in base_missing.detail
+
+
+def test_probe_train_paths_flux_components(tmp_path: Path) -> None:
+    scripts = _sd_scripts(tmp_path, entrypoint="flux_train_network.py")
+    clip = tmp_path / "clip_l.safetensors"
+    clip.write_bytes(b"x")
+    settings = _settings(
+        tmp_path,
+        train_sd_scripts_dir=scripts,
+        train_model_type="flux",
+        train_flux_clip_l=str(clip),
+    )
+    checks = {c.name: c for c in probe_train_paths(settings)}
+    assert checks["flux clip_l"].ok is True
+    assert checks["flux t5xxl"].ok is False  # not set
+    assert checks["flux ae"].ok is False
+
+
+def test_gather_checks_appends_train_when_settings(tmp_path: Path) -> None:
+    ws = _ws(tmp_path)
+    ws.pages.mkdir(parents=True)
+    settings = _settings(tmp_path, train_sd_scripts_dir=_sd_scripts(tmp_path))
+    fake_gpu = [
+        lambda: Check("torch / CUDA", True, "x"),
+        lambda: Check("onnxruntime", True, "x"),
+    ]
+    checks = gather_checks(
+        ws,
+        env_path=tmp_path / ".env",
+        gpu_probes=fake_gpu,
+        settings=settings,
+        train_python_probe=lambda _s: Check("trainer torch", True, "arch_list=sm_120"),
+    )
+    names = [c.name for c in checks]
+    assert "sd-scripts" in names and "base model" in names
+    assert names[-1] == "trainer torch"  # appended last
 
 
 def test_format_doctor_report_all_ok() -> None:
