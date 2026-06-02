@@ -30,7 +30,10 @@ if TYPE_CHECKING:
 NO_STYLE = (
     "Do NOT mention the art style, medium, rendering, line, palette, colors, or words like "
     "comic / painterly / ink / illustration / monochrome / lineart / sketch / screentone / "
-    "speech bubble — a separate style trigger handles all of that."
+    "speech bubble — a separate style trigger handles all of that. Also do NOT refer to the "
+    "comic structure itself: avoid the words 'panel', 'frame', 'gutter', 'page', 'comic'. "
+    "Describe the scene as if it were a single photograph (you may still name the shot, e.g. "
+    "close-up / wide shot / low angle)."
 )
 
 #: Caption-style presets. 'rich' describes more content (cleaner style residual);
