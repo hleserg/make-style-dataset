@@ -61,6 +61,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--workspace", type=Path, help="Override the workspace root directory."
     )
 
+    ui_parser = sub.add_parser(
+        "ui",
+        help="Launch the local web UI (needs the 'ui' dependency group).",
+        description="Serve the step-by-step wizard in your browser (install: uv sync --group ui).",
+    )
+    ui_parser.add_argument("--workspace", type=Path, help="Override the workspace root directory.")
+
     for stage in STAGES:
         stage_parser = sub.add_parser(stage.name, help=stage.summary, description=stage.summary)
         _add_common(stage_parser)
@@ -116,6 +123,22 @@ def main(argv: list[str] | None = None) -> int:
             print(format_doctor_report(gather_checks(workspace)))
         else:
             print(format_init_report(initialize_workspace(workspace), workspace))
+        return 0
+
+    if args.command == "ui":
+        # Lazy import so the CLI (and `make check`) never require Gradio: the
+        # heavy UI deps live in the optional 'ui' group, imported only on demand.
+        try:
+            from make_style_dataset.ui.app import launch_ui
+        except ModuleNotFoundError:
+            print(
+                "The web UI needs the optional 'ui' dependency group. Install it with:\n"
+                "  uv sync --group ui\n"
+                "then rerun:  make-style-dataset ui   (or just: make ui)",
+                file=sys.stderr,
+            )
+            return 1
+        launch_ui(_resolve_context(args))
         return 0
 
     ctx = _resolve_context(args)

@@ -69,6 +69,15 @@ gpu = [
     "onnxruntime>=1.19 ; sys_platform == 'darwin'",
 ]
 
+# Local web UI (S8). Same rationale as `gpu`: a PEP 735 dependency-group, NOT an
+# extra, so the documented `uv sync --all-extras` (CI, `make check`) stays light
+# and `pip-audit` never scans Gradio's large transitive tree. Install locally
+# with `uv sync --group ui`; launch with `make-style-dataset ui`. Still pinned in
+# uv.lock on every platform.
+ui = [
+    "gradio>=5",
+]
+
 # CUDA wheels for torch/torchvision. cu128 carries Blackwell (sm_120, RTX 50xx)
 # kernels — verified on this box's GPU (capability 12.0, arch_list includes
 # sm_120). `explicit = true` means this index is used ONLY for packages mapped
@@ -131,7 +140,9 @@ markers = [
 [tool.coverage.run]
 branch = true
 source = ["src/make_style_dataset"]
-omit = ["src/make_style_dataset/cli.py"]
+# cli.py and ui/app.py are thin shells (argparse / Gradio wiring): all real,
+# testable logic lives in importable modules (pipeline, onboarding, ui/service).
+omit = ["src/make_style_dataset/cli.py", "src/make_style_dataset/ui/app.py"]
 
 [tool.coverage.report]
 fail_under = 90
