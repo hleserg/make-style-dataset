@@ -11,7 +11,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -59,6 +59,24 @@ class Settings(BaseSettings):
         default=10,
         ge=1,
         description="kohya repeat count; the dataset folder is named '<repeats>_<trigger>'.",
+    )
+
+    # --- VLM re-caption (Gemini prose via the proxy Space) ---
+    hf_token: str = Field(
+        default="",
+        validation_alias=AliasChoices("HF_TOKEN", "HUGGINGFACE_TOKEN", "HUGGINGFACE_HUB_TOKEN"),
+        description="HF token (read access) for the private Gemini proxy Space. Not APP_-prefixed.",
+    )
+    vlm_model: str = Field(
+        default="gemini-2.5-flash",
+        description="Gemini model for VLM re-captioning (agent default; the UI button uses pro).",
+    )
+    vlm_prompt_style: str = Field(
+        default="rich",
+        description="VLM caption style: 'rich' (more content, cleaner style residual) or 'optimal'.",
+    )
+    vlm_concurrency: int = Field(
+        default=8, ge=1, description="Concurrent proxy calls when re-captioning a dataset."
     )
 
     # --- Pipeline: stage thresholds ---

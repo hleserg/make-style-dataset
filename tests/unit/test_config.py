@@ -56,3 +56,14 @@ def test_reads_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     settings = get_settings()
     assert settings.environment == "production"
     assert settings.debug is True
+
+
+def test_vlm_caption_defaults_and_hf_token_alias(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HF_TOKEN", "hf_test_value")
+    get_settings.cache_clear()
+    settings = get_settings()
+    assert settings.vlm_model == "gemini-2.5-flash"
+    assert settings.vlm_prompt_style == "rich"
+    assert settings.vlm_concurrency == 8
+    assert settings.hf_token == "hf_test_value"  # read from non-prefixed HF_TOKEN
+    get_settings.cache_clear()
