@@ -30,6 +30,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from make_style_dataset.media import image_files, route_to_manual
 from make_style_dataset.observability import tag_component
 from make_style_dataset.stages.base import Stage, StageContext, StageResult
 
@@ -41,9 +42,6 @@ if TYPE_CHECKING:
 NAME = "clean"
 SUMMARY = "Deduplicate panels and filter out ones that are too small."
 COMPONENT = "stage:clean"
-
-#: Panel formats read from ``03_inpainted``.
-IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp", ".bmp"})
 
 #: pHash: edge of the low-frequency block kept (8 -> a 64-bit hash) and the
 #: factor by which the image is first downscaled (8 * 4 = 32x32 before the DCT).
@@ -162,24 +160,9 @@ def _write_png(image_bgr: np.ndarray, path: Path) -> None:
     Image.fromarray(image_bgr[:, :, ::-1], mode="RGB").save(path)
 
 
-def _route_to_manual(panel_path: Path, manual_review: Path, reason: str) -> None:
-    """Copy a panel whole into ``manual_review`` with a reason note."""
-    import shutil
-
-    shutil.copy2(panel_path, manual_review / panel_path.name)
-    note = manual_review / f"{panel_path.stem}.reason.txt"
-    note.write_text(f"{reason}\n", encoding="utf-8")
-
-
 def iter_panels(panels_dir: Path) -> list[Path]:
     """Return panel image files under ``panels_dir`` in stable (sorted) order."""
-    if not panels_dir.is_dir():
-        return []
-    return sorted(
-        path
-        for path in panels_dir.iterdir()
-        if path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES
-    )
+    return image_files(panels_dir)
 
 
 # --- Orchestration ---------------------------------------------------------
@@ -210,7 +193,7 @@ def run(ctx: StageContext) -> StageResult:
     for path in kept:
         image = images[path]
         if short_side(image) < ctx.settings.min_side_px:
-            _route_to_manual(path, manual_review, "too small after inpaint")
+            route_to_manual(path, manual_review, "too small after inpaint")
             dropped_small += 1
             continue
         if ctx.settings.clean_denoise:

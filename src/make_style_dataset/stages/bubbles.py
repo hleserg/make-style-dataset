@@ -27,6 +27,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
+from make_style_dataset.media import image_files, route_to_manual
 from make_style_dataset.observability import tag_component
 from make_style_dataset.stages.base import Stage, StageContext, StageResult
 
@@ -40,9 +41,6 @@ if TYPE_CHECKING:
 NAME = "bubbles"
 SUMMARY = "Detect speech bubbles and SFX/text in panels and write removal masks."
 COMPONENT = "stage:bubbles"
-
-#: Panel formats we can read from ``01_panels`` (matches the panels stage).
-IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp", ".bmp"})
 
 #: Weight file to pull when ``bubble_model`` is a Hugging Face repo id.
 BUBBLE_WEIGHTS_FILE = "model.pt"
@@ -258,13 +256,7 @@ def overlay_mask(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
 
 def iter_panels(panels_dir: Path) -> list[Path]:
     """Return panel image files under ``panels_dir`` in stable (sorted) order."""
-    if not panels_dir.is_dir():
-        return []
-    return sorted(
-        path
-        for path in panels_dir.iterdir()
-        if path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES
-    )
+    return image_files(panels_dir)
 
 
 def _decode_bgr(panel_path: Path) -> np.ndarray | None:
@@ -287,15 +279,6 @@ def _write_png(array: np.ndarray, path: Path) -> None:
     Image.fromarray(pixels, mode=mode).save(path)
 
 
-def _route_to_manual(panel_path: Path, manual_review: Path, reason: str) -> None:
-    """Copy a panel whole into ``manual_review`` with a reason note."""
-    import shutil
-
-    shutil.copy2(panel_path, manual_review / panel_path.name)
-    note = manual_review / f"{panel_path.stem}.reason.txt"
-    note.write_text(f"{reason}\n", encoding="utf-8")
-
-
 def mask_panel(
     panel_path: Path,
     *,
@@ -314,7 +297,7 @@ def mask_panel(
     """
     image = _decode_bgr(panel_path)
     if image is None:
-        _route_to_manual(panel_path, manual_review, "unreadable panel")
+        route_to_manual(panel_path, manual_review, "unreadable panel")
         return False
 
     height, width = image.shape[:2]
@@ -326,7 +309,7 @@ def mask_panel(
 
     reason = classify_mask(mask, max_coverage=settings.max_mask_coverage)
     if reason is not None:
-        _route_to_manual(panel_path, manual_review, reason)
+        route_to_manual(panel_path, manual_review, reason)
         return False
 
     _write_png(mask, out_dir / f"{panel_path.stem}.png")

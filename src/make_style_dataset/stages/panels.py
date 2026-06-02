@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
+from make_style_dataset.media import image_files, route_to_manual
 from make_style_dataset.observability import tag_component
 from make_style_dataset.stages.base import Stage, StageContext, StageResult
 
@@ -32,9 +33,6 @@ if TYPE_CHECKING:
 NAME = "panels"
 SUMMARY = "Detect comic panels and slice pages into individual panel images."
 COMPONENT = "stage:panels"
-
-#: Page formats Pillow/OpenCV will read from ``00_pages``.
-IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp", ".bmp"})
 
 #: Grayscale level above which a pixel counts as gutter/background (Kumiko uses
 #: the same idea): anything lighter is gutter, anything darker is panel ink.
@@ -165,22 +163,7 @@ def panel_boxes(raw: Iterable[Box], page_w: int, page_h: int, settings: Settings
 
 def iter_pages(pages_dir: Path) -> list[Path]:
     """Return page image files under ``pages_dir`` in stable (sorted) order."""
-    if not pages_dir.is_dir():
-        return []
-    return sorted(
-        path
-        for path in pages_dir.iterdir()
-        if path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES
-    )
-
-
-def _route_to_manual(page_path: Path, manual_review: Path, reason: str) -> None:
-    """Copy a mis-segmented page whole into ``manual_review`` with a reason note."""
-    import shutil
-
-    shutil.copy2(page_path, manual_review / page_path.name)
-    note = manual_review / f"{page_path.stem}.reason.txt"
-    note.write_text(f"{reason}\n", encoding="utf-8")
+    return image_files(pages_dir)
 
 
 def slice_page(
@@ -211,7 +194,7 @@ def slice_page(
             splash_ratio=settings.splash_area_ratio,
         )
         if reason is not None:
-            _route_to_manual(page_path, manual_review, reason)
+            route_to_manual(page_path, manual_review, reason)
             return 0
         stem = page_path.stem
         for idx, box in enumerate(boxes):
