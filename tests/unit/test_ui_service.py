@@ -296,3 +296,66 @@ def test_stream_error_falls_back_to_class_name(tmp_path: Path) -> None:
     events = list(run_pipeline_stream(ctx, stages=stages, runner=runner))
     assert events[1].phase == "error"
     assert events[1].detail == "RuntimeError"
+
+
+# --- promote_to_clean (manual_review rescue) -------------------------------
+
+
+def test_promote_to_clean_rescues_upscales_and_invalidates_caption(tmp_path: Path) -> None:
+    import cv2
+    import numpy as np
+
+    from make_style_dataset.pipeline import DONE_MARKER
+    from make_style_dataset.ui.service import promote_to_clean
+
+    ws = Workspace(root=tmp_path)
+    ws.ensure_base()
+    settings = Settings(target_side=16, dataset_repeats=10, trigger_token="comicstyle")
+    review = ws.manual_review
+    review.mkdir(parents=True, exist_ok=True)
+
+    from PIL import Image
+
+    def _img(name: str) -> Path:
+        path = review / name
+        Image.new("RGB", (8, 8), (120, 120, 120)).save(path)  # real PNG cv2 can decode
+        return path
+
+    keep = _img("panel_00.png")
+    (review / "panel_00.reason.txt").write_text("too small after inpaint", encoding="utf-8")
+    _img("panel_01.png")  # left un-selected
+    (review / "panel_01.reason.txt").write_text("too small after inpaint", encoding="utf-8")
+
+    dataset = ws.training_dir(settings.dataset_repeats, settings.trigger_token)
+    dataset.mkdir(parents=True, exist_ok=True)
+    marker = dataset / DONE_MARKER
+    marker.write_text("caption\n", encoding="utf-8")
+
+    # the "../escape.png" value is sanitised to a basename that doesn't exist -> skipped
+    promoted = promote_to_clean(ws, ["panel_00.png", "../escape.png"], settings)
+
+    assert promoted == 1
+    out = ws.clean / "panel_00.png"
+    assert out.is_file()
+    rescued = cv2.imdecode(np.fromfile(out, np.uint8), cv2.IMREAD_COLOR)
+    assert min(rescued.shape[:2]) == 16  # upscaled to target_side
+    assert not keep.is_file()  # moved out of manual_review
+    assert not (review / "panel_00.reason.txt").is_file()
+    assert (review / "panel_01.png").is_file()  # un-selected panel stays
+    assert not marker.exists()  # caption marker cleared -> next build re-captions
+
+
+def test_promote_to_clean_no_selection_keeps_caption_marker(tmp_path: Path) -> None:
+    from make_style_dataset.pipeline import DONE_MARKER
+    from make_style_dataset.ui.service import promote_to_clean
+
+    ws = Workspace(root=tmp_path)
+    ws.ensure_base()
+    settings = Settings(target_side=16)
+    dataset = ws.training_dir(settings.dataset_repeats, settings.trigger_token)
+    dataset.mkdir(parents=True, exist_ok=True)
+    marker = dataset / DONE_MARKER
+    marker.write_text("caption\n", encoding="utf-8")
+
+    assert promote_to_clean(ws, [], settings) == 0
+    assert marker.exists()  # nothing promoted -> marker untouched
