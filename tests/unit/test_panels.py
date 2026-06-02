@@ -179,7 +179,7 @@ def test_run_slices_all_pages(tmp_path: Path, monkeypatch) -> None:
     _white_page(ws.pages / "p1.png")
     _white_page(ws.pages / "p2.png")
     monkeypatch.setattr(
-        panels, "ContourPanelDetector", lambda: FakeDetector([Box(10, 10, 100, 100)])
+        panels, "ContourPanelDetector", lambda **_kwargs: FakeDetector([Box(10, 10, 100, 100)])
     )
     ctx = StageContext(workspace=ws, settings=settings)
 
@@ -191,3 +191,38 @@ def test_run_slices_all_pages(tmp_path: Path, monkeypatch) -> None:
     again = panels.run(ctx)
     assert again.produced == 2
     assert len(list(ws.panels.iterdir())) == 2
+
+
+# --- recursive gutter split (X-Y cut of merged panel boxes) ----------------
+
+
+def test_content_spans_cuts_on_gutter_band_not_thin_line() -> None:
+    # content 0-1, gutter band 2-4 (run 3), content 5-6
+    assert panels.content_spans([False, False, True, True, True, False, False], 2, 1) == [
+        (0, 2),
+        (5, 7),
+    ]
+    # a single gutter row (run 1) is a thin line, not a cut -> one span
+    assert panels.content_spans([False, False, True, False, False], 2, 1) == [(0, 5)]
+    # spans shorter than min_side are dropped
+    assert panels.content_spans([False, True, True, False, False, False], 2, 2) == [(3, 6)]
+
+
+def test_split_by_gutters_splits_a_2x2_grid_without_resizing() -> None:
+    import numpy as np
+
+    page = np.full((100, 100), 255, dtype=np.uint8)  # all light = gutter
+    for y, x in [(0, 0), (0, 60), (60, 0), (60, 60)]:
+        page[y : y + 40, x : x + 40] = 0  # four 40x40 dark panels, 20px gutter cross
+    boxes = panels.split_by_gutters(page, Box(0, 0, 100, 100), 220, min_side=10, min_run=5)
+    assert len(boxes) == 4
+    # every piece keeps the native 40x40 proportions — coordinates only, no stretch
+    assert all((b.w, b.h) == (40, 40) for b in boxes)
+    assert {(b.x, b.y) for b in boxes} == {(0, 0), (60, 0), (0, 60), (60, 60)}
+
+
+def test_split_by_gutters_keeps_a_single_panel_whole() -> None:
+    import numpy as np
+
+    page = np.zeros((50, 50), dtype=np.uint8)  # all dark = one panel, no interior gutter
+    assert panels.split_by_gutters(page, Box(0, 0, 50, 50), 220) == [Box(0, 0, 50, 50)]

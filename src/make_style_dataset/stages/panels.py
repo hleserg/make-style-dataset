@@ -38,6 +38,17 @@ COMPONENT = "stage:panels"
 #: the same idea): anything lighter is gutter, anything darker is panel ink.
 GUTTER_THRESHOLD = 220
 
+#: Recursive gutter-split (X-Y cut) of merged panel boxes. A row/column counts as
+#: gutter when at least ``RESPLIT_GUTTER_FRAC`` of it is lighter than the gutter
+#: threshold; a gutter band must be >= ``RESPLIT_MIN_GUTTER`` px to cut (thin ink
+#: lines don't); split pieces below ``RESPLIT_MIN_SIDE`` px a side are ignored
+#: (``filter_by_area`` drops the rest). Splitting only ever subdivides
+#: coordinates — it never resizes, so crops keep their exact proportions.
+RESPLIT_GUTTER_FRAC = 0.97
+RESPLIT_MIN_GUTTER = 8
+RESPLIT_MIN_SIDE = 32
+RESPLIT_MAX_DEPTH = 4
+
 
 @dataclass(frozen=True)
 class Box:
@@ -77,11 +88,17 @@ class PanelDetector(Protocol):
 class ContourPanelDetector:
     """Kumiko-style detector: threshold gutters, take ink-region bounding boxes."""
 
-    def __init__(self, *, gutter_threshold: int = GUTTER_THRESHOLD) -> None:
+    def __init__(self, *, gutter_threshold: int = GUTTER_THRESHOLD, resplit: bool = True) -> None:
         self._threshold = gutter_threshold
+        self._resplit = resplit
 
     def detect(self, image_path: Path) -> list[Box]:
-        """Detect panel boxes via OpenCV external-contour bounding rectangles."""
+        """Detect panel boxes via OpenCV external-contour bounding rectangles.
+
+        When ``resplit`` is on, each contour box is then X-Y-cut along any clean
+        interior gutter bands, so touching / thin-gutter panels that merged into
+        one contour are recovered as separate panels.
+        """
         import cv2
         import numpy as np
 
@@ -100,7 +117,83 @@ class ContourPanelDetector:
         for contour in contours:
             x, y, w, h = cv2.boundingRect(contour)
             boxes.append(Box(int(x), int(y), int(w), int(h)))
-        return boxes
+        if not self._resplit:
+            return boxes
+        return [piece for box in boxes for piece in split_by_gutters(gray, box, self._threshold)]
+
+
+def content_spans(is_gutter: list[bool], min_run: int, min_side: int) -> list[tuple[int, int]]:
+    """Split an axis into content spans separated by gutter runs of ``>= min_run``.
+
+    ``is_gutter[i]`` marks a fully-gutter row/column. Leading/trailing gutter is
+    trimmed; a gutter run shorter than ``min_run`` is a thin ink line, not a cut,
+    so the span continues across it. Spans shorter than ``min_side`` are dropped.
+    Returns ``[(start, end), ...]`` half-open content ranges.
+    """
+    spans: list[tuple[int, int]] = []
+    n = len(is_gutter)
+    i = 0
+    while i < n:
+        if is_gutter[i]:
+            i += 1
+            continue
+        start = i
+        last_content = i
+        while i < n:
+            if not is_gutter[i]:
+                last_content = i
+                i += 1
+                continue
+            run_start = i
+            while i < n and is_gutter[i]:
+                i += 1
+            if i - run_start >= min_run or i >= n:
+                break  # a real gutter band (or the end) closes the span
+            # else: a short run (thin line) — keep going within the same span
+        if last_content + 1 - start >= min_side:
+            spans.append((start, last_content + 1))
+    return spans
+
+
+def split_by_gutters(
+    gray: object,
+    box: Box,
+    threshold: int,
+    *,
+    gutter_frac: float = RESPLIT_GUTTER_FRAC,
+    min_run: int = RESPLIT_MIN_GUTTER,
+    min_side: int = RESPLIT_MIN_SIDE,
+    max_depth: int = RESPLIT_MAX_DEPTH,
+) -> list[Box]:
+    """Recursively X-Y-cut ``box`` along clean interior gutter bands of ``gray``.
+
+    Pure geometry over the page's grayscale array: a row/column is gutter when
+    ``>= gutter_frac`` of it is ``>= threshold`` (light); the box is split along
+    gutter bands ``>= min_run`` px, recursing on the pieces (preferring the axis
+    with more cuts). A box with no clean interior gutter returns ``[box]``
+    unchanged. Only coordinates are subdivided — nothing is resized, so every
+    resulting crop keeps its native proportions.
+    """
+    import numpy as np
+
+    array = np.asarray(gray)
+
+    def rec(x: int, y: int, w: int, h: int, depth: int) -> list[Box]:
+        if depth >= max_depth or (h < 2 * min_side and w < 2 * min_side):
+            return [Box(x, y, w, h)]
+        region = array[y : y + h, x : x + w]
+        light = region >= threshold
+        row_gutter = (light.mean(axis=1) >= gutter_frac).tolist()
+        col_gutter = (light.mean(axis=0) >= gutter_frac).tolist()
+        rows = content_spans(row_gutter, min_run, min_side)
+        cols = content_spans(col_gutter, min_run, min_side)
+        if len(rows) > 1 and len(rows) >= len(cols):
+            return [piece for s, e in rows for piece in rec(x, y + s, w, e - s, depth + 1)]
+        if len(cols) > 1:
+            return [piece for s, e in cols for piece in rec(x + s, y, e - s, h, depth + 1)]
+        return [Box(x, y, w, h)]
+
+    return rec(box.x, box.y, box.w, box.h, 0)
 
 
 def shrink_box(box: Box, border: int, page_w: int, page_h: int) -> Box | None:
@@ -211,7 +304,7 @@ def run(ctx: StageContext) -> StageResult:
     manual_review = ctx.workspace.manual_review
     manual_review.mkdir(parents=True, exist_ok=True)
 
-    detector = ContourPanelDetector()
+    detector = ContourPanelDetector(resplit=ctx.settings.panel_resplit)
     produced = 0
     for page_path in iter_pages(ctx.workspace.pages):
         produced += slice_page(

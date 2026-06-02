@@ -83,6 +83,14 @@ class Settings(BaseSettings):
         le=1.0,
         description="A lone panel covering at least this fraction of the page is a splash.",
     )
+    panel_resplit: bool = Field(
+        default=True,
+        description=(
+            "Recursively X-Y-cut merged panel boxes along clean interior gutters, to "
+            "recover touching / thin-gutter panels the contour pass lumped together. "
+            "Coordinates-only (no resize). Disable if it over-splits busy artwork."
+        ),
+    )
     dedup_hamming_distance: int = Field(
         default=6,
         ge=0,
