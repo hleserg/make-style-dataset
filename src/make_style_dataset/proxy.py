@@ -51,6 +51,8 @@ class GeminiProxyClient:
     def __init__(
         self, hf_token: str, *, url: str = PROXY_CAPTION_URL, timeout: float = 180.0
     ) -> None:
+        if not url.startswith("https://"):
+            raise ValueError("proxy url must be https:// (no file:/ or custom schemes)")
         self._token = hf_token
         self._url = url
         self._timeout = timeout
@@ -66,13 +68,15 @@ class GeminiProxyClient:
             data=json.dumps({"data": [model, prompt, b64]}).encode(),
             headers={**auth, "Content-Type": "application/json"},
         )
-        event_id = json.load(urllib.request.urlopen(submit, timeout=self._timeout))["event_id"]
+        with urllib.request.urlopen(submit, timeout=self._timeout) as resp:  # nosec B310
+            event_id = json.load(resp)["event_id"]
         stream = urllib.request.Request(f"{self._url}/{event_id}", headers=auth)
         last: str | None = None
-        for raw in urllib.request.urlopen(stream, timeout=self._timeout):
-            line = raw.decode("utf-8", "replace").rstrip("\n")
-            if line.startswith("data:"):
-                payload = line[5:].strip()
-                if payload and payload != "null":
-                    last = payload
+        with urllib.request.urlopen(stream, timeout=self._timeout) as events:  # nosec B310
+            for raw in events:
+                line = raw.decode("utf-8", "replace").rstrip("\n")
+                if line.startswith("data:"):
+                    payload = line[5:].strip()
+                    if payload and payload != "null":
+                        last = payload
         return parse_proxy_payload(last)

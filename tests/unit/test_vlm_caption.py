@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from make_style_dataset.proxy import parse_proxy_payload
+import pytest
+
+from make_style_dataset.proxy import GeminiProxyClient, parse_proxy_payload
 from make_style_dataset.vlm_caption import (
     NO_STYLE,
     build_prompt,
@@ -155,3 +157,9 @@ def test_recaption_retries_on_client_exception(tmp_path: Path) -> None:
     assert result.written == 1
     assert client.n == 2  # raised once, retried, then succeeded
     assert (tmp_path / "a.txt").read_text(encoding="utf-8").strip() == "t, a knight"
+
+
+def test_gemini_proxy_client_requires_https() -> None:
+    with pytest.raises(ValueError, match="https"):
+        GeminiProxyClient("t", url="http://insecure")
+    GeminiProxyClient("tok")  # default https URL constructs fine
