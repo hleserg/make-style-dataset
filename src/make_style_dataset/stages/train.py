@@ -4,8 +4,7 @@ Reads the kohya dataset folder ``05_dataset/<repeats>_<trigger>/`` and trains a
 style LoRA into ``06_lora/<name>.safetensors`` by shelling out to a local clone
 of kohya **sd-scripts**. The entrypoint is chosen by ``train_model_type``:
 ``train_network.py`` (SD 1.5), ``sdxl_train_network.py`` (SDXL) or
-``flux_train_network.py`` (Flux). This module wires **SD 1.5** and **SDXL**
-end-to-end; the Flux argument branch lands in a later subtask.
+``flux_train_network.py`` (Flux). All three families are wired end-to-end.
 
 Pure-core-lazy-backend (shared with ``caption.py``/``inpaint.py``): the dataset
 ``--dataset_config`` TOML builder, the argument builder and the stdout progress
@@ -44,8 +43,8 @@ ENTRYPOINTS: dict[str, tuple[str, str]] = {
     "flux": ("flux_train_network.py", "networks.lora_flux"),
 }
 
-#: Families with their ``build_train_args`` branch wired. flux lands in [T2].
-SUPPORTED_MODEL_TYPES = frozenset({"sd15", "sdxl"})
+#: Families with their ``build_train_args`` branch wired.
+SUPPORTED_MODEL_TYPES = frozenset({"sd15", "sdxl", "flux"})
 
 #: ``epoch 1/10`` banner (kohya prints it on stdout between epochs).
 _EPOCH_RE = re.compile(r"^epoch (\d+)/(\d+)")
@@ -240,15 +239,16 @@ def build_train_args(
 ) -> list[str]:
     """Build the sd-scripts script arguments (appended after the entrypoint).
 
-    Covers the flags common to every family plus the SD 1.5 and SDXL specifics.
-    Raises :class:`NotImplementedError` for flux (wired in [T2]) and
-    :class:`ValueError` when the base checkpoint is unset.
+    Covers the flags common to every family plus the SD 1.5, SDXL and Flux
+    specifics. Raises :class:`NotImplementedError` for an unknown family and
+    :class:`ValueError` when the base checkpoint (or a required Flux component
+    path) is unset.
     """
     model_type = settings.train_model_type.strip().lower()
     if model_type not in SUPPORTED_MODEL_TYPES:
         raise NotImplementedError(
-            f"train_model_type={model_type!r} is not wired yet; "
-            f"set APP_TRAIN_MODEL_TYPE to sd15 or sdxl (flux lands in [T2])."
+            f"train_model_type={model_type!r} is not supported; "
+            f"set APP_TRAIN_MODEL_TYPE to one of: sd15, sdxl, flux."
         )
     if not settings.train_base_model:
         raise ValueError(
@@ -299,6 +299,33 @@ def build_train_args(
             # Train both text encoders; --text_encoder_lr is nargs=* (two values).
             lr = str(settings.train_text_encoder_lr)
             args.extend(["--text_encoder_lr", lr, lr])
+    elif model_type == "flux":
+        missing = [
+            env
+            for env, value in (
+                ("APP_TRAIN_FLUX_CLIP_L", settings.train_flux_clip_l),
+                ("APP_TRAIN_FLUX_T5XXL", settings.train_flux_t5xxl),
+                ("APP_TRAIN_FLUX_AE", settings.train_flux_ae),
+            )
+            if not value
+        ]
+        if missing:
+            raise ValueError(f"Flux training needs component paths; set {', '.join(missing)}.")
+        args.append(f"--clip_l={settings.train_flux_clip_l}")
+        args.append(f"--t5xxl={settings.train_flux_t5xxl}")
+        args.append(f"--ae={settings.train_flux_ae}")
+        # DiT-LoRA only (keeps TE-output caching valid) + the canonical FLUX.1-dev
+        # style recipe: distilled guidance off, flux_shift timesteps, raw prediction.
+        args.append("--network_train_unet_only")
+        args.append("--guidance_scale=1.0")
+        args.append("--timestep_sampling=flux_shift")
+        args.append("--model_prediction_type=raw")
+        args.append("--fp8_base")  # required to fit FLUX (12B) on 16 GB
+        if settings.train_cache_latents:
+            args.append("--cache_text_encoder_outputs")
+            args.append("--cache_text_encoder_outputs_to_disk")
+        if settings.train_flux_blocks_to_swap > 0:
+            args.append(f"--blocks_to_swap={settings.train_flux_blocks_to_swap}")
     return args
 
 

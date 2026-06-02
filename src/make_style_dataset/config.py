@@ -239,6 +239,25 @@ class Settings(BaseSettings):
         description="SDXL: learning rate for both text encoders when train_unet_only is False. "
         "None falls back to the main learning_rate.",
     )
+    train_flux_clip_l: str = Field(
+        default="",
+        description="Flux: path to the CLIP-L text-encoder .safetensors (required for Flux).",
+    )
+    train_flux_t5xxl: str = Field(
+        default="",
+        description="Flux: path to the T5-XXL text-encoder .safetensors (required for Flux).",
+    )
+    train_flux_ae: str = Field(
+        default="",
+        description="Flux: path to the autoencoder (VAE) .safetensors (required for Flux).",
+    )
+    train_flux_blocks_to_swap: int = Field(
+        default=18,
+        ge=0,
+        le=35,
+        description="Flux: transformer blocks swapped to CPU to fit VRAM (0 disables; 16 GB "
+        "needs ~8-18, max 35).",
+    )
 
     # --- Local web UI (S8) ---
     ui_host: str = Field(
