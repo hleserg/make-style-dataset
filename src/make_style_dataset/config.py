@@ -120,9 +120,13 @@ class Settings(BaseSettings):
         description="Comma-separated EasyOCR language codes for SFX/text detection (e.g. 'en,ja').",
     )
     mask_dilation_px: int = Field(
-        default=5,
+        default=10,
         ge=0,
-        description="Dilate the bubble+text mask by this many px to catch outlines/letter strokes.",
+        description=(
+            "Dilate the bubble+text mask by this many px so the inpaint also eats the "
+            "bubble outline and reaches the art around it (a small value leaves a white "
+            "ring/empty bubble). Raise it if outlines survive; lower it if fills bleed."
+        ),
     )
     max_mask_coverage: float = Field(
         default=0.6,
