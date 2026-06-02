@@ -35,6 +35,43 @@ def build_settings(base: Settings, trigger: str, repeats: float | int) -> Settin
     return base.model_copy(update={"trigger_token": token, "dataset_repeats": reps})
 
 
+def build_train_settings(
+    base: Settings,
+    *,
+    model_type: str,
+    base_model: str,
+    network_dim: float | int,
+    network_alpha: float | int,
+    learning_rate: float,
+    max_train_steps: float | int,
+) -> Settings:
+    """Return ``base`` with the training-step inputs applied, clamped, ``run_train`` on.
+
+    Like :func:`build_settings`, ``model_copy(update=…)`` skips validation, so the
+    clamps (dim/alpha/steps ``>= 1``; learning rate ``> 0``, else the base value)
+    live here. Blank ``model_type`` falls back to the base family.
+    """
+    lr = float(learning_rate)
+    return base.model_copy(
+        update={
+            "train_model_type": ((model_type or "").strip().lower() or base.train_model_type),
+            "train_base_model": (base_model or "").strip(),
+            "train_network_dim": max(1, int(network_dim)),
+            "train_network_alpha": max(1, int(network_alpha)),
+            "train_learning_rate": lr if lr > 0 else base.train_learning_rate,
+            "train_max_train_steps": max(1, int(max_train_steps)),
+            "run_train": True,
+        }
+    )
+
+
+def lora_files(lora_dir: Path) -> list[Path]:
+    """Return trained ``.safetensors`` files in ``lora_dir`` (sorted; empty if absent)."""
+    if not lora_dir.is_dir():
+        return []
+    return sorted(p for p in lora_dir.iterdir() if p.is_file() and p.suffix == ".safetensors")
+
+
 def save_uploaded_pages(uploaded: Iterable[str | Path] | None, pages_dir: Path) -> int:
     """Copy uploaded image files into ``pages_dir``; return how many were saved.
 

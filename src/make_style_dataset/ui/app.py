@@ -21,10 +21,13 @@ from __future__ import annotations
 import gradio as gr
 
 from make_style_dataset.pipeline import make_context, summarize_run
+from make_style_dataset.stages import train
 from make_style_dataset.stages.base import StageContext
 from make_style_dataset.ui.service import (
     build_settings,
+    build_train_settings,
     gallery_items,
+    lora_files,
     run_pipeline_stream,
     save_uploaded_pages,
     zip_training_dir,
@@ -96,6 +99,52 @@ def build_demo(ctx: StageContext) -> gr.Blocks:
                     "them if you already have enough."
                 )
                 review_gallery = gr.Gallery(label="Needs a human", columns=4, height="auto")
+            to_step4 = gr.Button("Train a LoRA from this dataset →")
+
+        # --- Step 4: train (optional) -------------------------------------
+        with gr.Group(visible=False) as step4:
+            gr.Markdown(
+                "### Step 4 — train a style LoRA (optional)\n"
+                "Needs a local kohya **sd-scripts** clone + a base checkpoint. Run "
+                "`make-style-dataset doctor` first to check the trainer environment. "
+                "Training takes a while — per-step progress prints in the terminal."
+            )
+            model_type_in = gr.Dropdown(
+                ["sd15", "sdxl", "flux"],
+                value=settings.train_model_type,
+                label="Base-model family",
+            )
+            base_model_in = gr.Textbox(
+                label="Base checkpoint path",
+                value=settings.train_base_model,
+                info="Local .safetensors (SD1.5/SDXL) or the Flux DiT. Required.",
+            )
+            with gr.Row():
+                dim_in = gr.Number(
+                    label="Network dim", value=settings.train_network_dim, precision=0, minimum=1
+                )
+                alpha_in = gr.Number(
+                    label="Network alpha",
+                    value=settings.train_network_alpha,
+                    precision=0,
+                    minimum=1,
+                )
+                lr_in = gr.Number(label="Learning rate", value=settings.train_learning_rate)
+                steps_in = gr.Number(
+                    label="Max train steps",
+                    value=settings.train_max_train_steps,
+                    precision=0,
+                    minimum=1,
+                )
+            train_btn = gr.Button("▶ Train LoRA", variant="primary")
+            train_log = gr.Textbox(
+                label="Training progress",
+                lines=12,
+                max_lines=12,
+                interactive=False,
+                autoscroll=True,
+            )
+            lora_download = gr.File(label="Download LoRA (.safetensors)")
 
         def _go_to_step2() -> tuple[object, object]:
             return gr.update(visible=False), gr.update(visible=True)
@@ -132,6 +181,62 @@ def build_demo(ctx: StageContext) -> gr.Blocks:
             inputs=[trigger_in, repeats_in, files_in],
             outputs=[build_log, step3, summary_md, result_gallery, review_gallery, download_file],
             api_name="build",
+        )
+
+        to_step4.click(lambda: gr.update(visible=True), outputs=[step4])
+
+        def _train(
+            trigger: str,
+            repeats: float,
+            model_type: str,
+            base_model: str,
+            dim: float,
+            alpha: float,
+            lr: float,
+            steps: float,
+        ):
+            run_settings = build_train_settings(
+                build_settings(settings, trigger, repeats),
+                model_type=model_type,
+                base_model=base_model,
+                network_dim=dim,
+                network_alpha=alpha,
+                learning_rate=lr,
+                max_train_steps=steps,
+            )
+            run_ctx = make_context(run_settings)
+
+            lines = [
+                f"Training a {run_settings.train_model_type} LoRA — this can take a while…",
+                "",
+            ]
+            yield {train_log: "\n".join(lines)}
+            for progress in run_pipeline_stream(run_ctx, force=True, stages=(train.STAGE,)):
+                lines.append(progress.line)
+                yield {train_log: "\n".join(lines)}
+
+            produced = lora_files(run_ctx.workspace.lora)
+            final = (
+                run_ctx.workspace.lora / f"{train.resolve_output_name(run_settings)}.safetensors"
+            )
+            download = str(final) if final.is_file() else (str(produced[-1]) if produced else None)
+            lines += ["", f"Done — {len(produced)} LoRA file(s) in {run_ctx.workspace.lora}."]
+            yield {train_log: "\n".join(lines), lora_download: download}
+
+        train_btn.click(
+            _train,
+            inputs=[
+                trigger_in,
+                repeats_in,
+                model_type_in,
+                base_model_in,
+                dim_in,
+                alpha_in,
+                lr_in,
+                steps_in,
+            ],
+            outputs=[train_log, lora_download],
+            api_name="train",
         )
 
     return demo

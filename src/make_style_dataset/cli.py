@@ -143,13 +143,19 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     ctx = _resolve_context(args)
-    if args.command == "run-all":
-        print("Running pipeline:")
-        _print_results(run_all(ctx, force=args.force))
-        print(summarize_run(ctx))
-    else:
-        print(f"Running stage '{args.command}':")
-        _print_results([run_single(args.command, ctx, force=args.force)])
+    try:
+        if args.command == "run-all":
+            print("Running pipeline:")
+            _print_results(run_all(ctx, force=args.force))
+            print(summarize_run(ctx))
+        else:
+            print(f"Running stage '{args.command}':")
+            _print_results([run_single(args.command, ctx, force=args.force)])
+    except (ValueError, RuntimeError) as exc:
+        # e.g. `train` with no dataset, or the trainer subprocess failing: show a
+        # one-line message instead of a raw traceback.
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
     return 0
 
 

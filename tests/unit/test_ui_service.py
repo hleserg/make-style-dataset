@@ -10,7 +10,9 @@ from make_style_dataset.stages.base import Stage, StageContext, StageResult
 from make_style_dataset.ui.service import (
     StageProgress,
     build_settings,
+    build_train_settings,
     gallery_items,
+    lora_files,
     run_pipeline_stream,
     save_uploaded_pages,
     zip_training_dir,
@@ -38,6 +40,60 @@ def test_build_settings_applies_trigger_and_repeats() -> None:
     out = build_settings(base, "hero", 7)
     assert out.trigger_token == "hero"
     assert out.dataset_repeats == 7
+
+
+# --- build_train_settings --------------------------------------------------
+
+
+def test_build_train_settings_applies_and_enables() -> None:
+    out = build_train_settings(
+        Settings(),
+        model_type="SDXL",
+        base_model=" /m.safetensors ",
+        network_dim=64,
+        network_alpha=32,
+        learning_rate=2e-4,
+        max_train_steps=2000,
+    )
+    assert out.train_model_type == "sdxl"  # lower-cased
+    assert out.train_base_model == "/m.safetensors"  # stripped
+    assert (out.train_network_dim, out.train_network_alpha) == (64, 32)
+    assert out.train_learning_rate == 2e-4
+    assert out.train_max_train_steps == 2000
+    assert out.run_train is True
+
+
+def test_build_train_settings_clamps_and_falls_back() -> None:
+    base = Settings(train_model_type="sd15", train_learning_rate=1e-4)
+    out = build_train_settings(
+        base,
+        model_type="",  # blank -> base family
+        base_model="",
+        network_dim=0,  # clamped to >= 1
+        network_alpha=0,
+        learning_rate=0,  # non-positive -> base lr
+        max_train_steps=0,  # clamped to >= 1
+    )
+    assert out.train_model_type == "sd15"
+    assert out.train_network_dim == 1 and out.train_network_alpha == 1
+    assert out.train_learning_rate == 1e-4
+    assert out.train_max_train_steps == 1
+
+
+# --- lora_files ------------------------------------------------------------
+
+
+def test_lora_files_lists_safetensors_sorted(tmp_path: Path) -> None:
+    lora = tmp_path / "06_lora"
+    lora.mkdir()
+    (lora / "b.safetensors").write_bytes(b"x")
+    (lora / "a.safetensors").write_bytes(b"x")
+    (lora / "dataset.toml").write_text("x", encoding="utf-8")  # not a LoRA
+    assert [p.name for p in lora_files(lora)] == ["a.safetensors", "b.safetensors"]
+
+
+def test_lora_files_missing_dir(tmp_path: Path) -> None:
+    assert lora_files(tmp_path / "absent") == []
 
 
 def test_build_settings_blank_trigger_falls_back() -> None:
