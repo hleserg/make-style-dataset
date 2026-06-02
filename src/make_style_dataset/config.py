@@ -155,6 +155,81 @@ class Settings(BaseSettings):
         description="Min WD14 confidence to keep a content tag (0.65-0.75 for 'reliable only').",
     )
 
+    # --- Stage 6 (train) — local LoRA training via kohya sd-scripts ---
+    train_model_type: str = Field(
+        default="sd15",
+        description="Base-model family to train: 'sd15', 'sdxl' or 'flux'. Selects the kohya "
+        "sd-scripts entrypoint.",
+    )
+    train_base_model: str = Field(
+        default="",
+        description="Path to the base checkpoint (SD1.5/SDXL .safetensors, or the Flux "
+        "transformer). Required to actually train; empty fails loudly at launch.",
+    )
+    train_sd_scripts_dir: Path = Field(
+        default=Path("/home/serg/sd-scripts"),
+        description="Local clone of kohya sd-scripts holding the *_train_network.py entrypoints.",
+    )
+    train_python: str = Field(
+        default="",
+        description="Python interpreter to launch sd-scripts with (needs a Blackwell-capable "
+        "cu128 torch). Empty is resolved/validated by `doctor`.",
+    )
+    train_network_dim: int = Field(default=32, ge=1, description="LoRA network dimension (rank).")
+    train_network_alpha: int = Field(
+        default=16, ge=1, description="LoRA network alpha (scaling; commonly dim or dim/2)."
+    )
+    train_learning_rate: float = Field(default=1e-4, gt=0.0, description="Optimizer learning rate.")
+    train_max_train_steps: int = Field(default=1600, ge=1, description="Total training steps.")
+    train_resolution: int = Field(
+        default=512,
+        ge=64,
+        description="Square training resolution (px): 512 for SD1.5, 1024 for SDXL/Flux.",
+    )
+    train_batch_size: int = Field(
+        default=1, ge=1, description="Per-device train batch size (keep 1 on 16 GB VRAM)."
+    )
+    train_seed: int = Field(default=42, ge=0, description="Training RNG seed for reproducibility.")
+    train_mixed_precision: str = Field(
+        default="fp16",
+        description="Mixed precision: 'no', 'fp16' or 'bf16' (bf16 recommended for SDXL/Flux).",
+    )
+    train_gradient_checkpointing: bool = Field(
+        default=True,
+        description="Trade compute for VRAM via gradient checkpointing (needed on 16 GB).",
+    )
+    train_cache_latents: bool = Field(
+        default=True,
+        description="Cache VAE latents to cut VRAM/time (disables crop/flip augmentation).",
+    )
+    train_output_name: str = Field(
+        default="",
+        description="Output LoRA filename stem (no extension). Empty uses the trigger token.",
+    )
+    train_optimizer_type: str = Field(
+        default="AdamW8bit",
+        description="kohya optimizer (AdamW8bit, AdamW, Lion, Prodigy, ...). AdamW8bit needs "
+        "bitsandbytes.",
+    )
+    train_lr_scheduler: str = Field(
+        default="constant",
+        description="LR schedule (constant, cosine, cosine_with_restarts, ...).",
+    )
+    train_save_every_n_epochs: int = Field(
+        default=1,
+        ge=0,
+        description="Save an intermediate LoRA every N epochs (0 disables intermediate saves).",
+    )
+    train_logging_dir: Path | None = Field(
+        default=None,
+        description="If set, write TensorBoard logs here (--logging_dir + --log_with=tensorboard).",
+    )
+    train_clip_skip: int = Field(
+        default=2,
+        ge=1,
+        description="CLIP skip (SD 1.5 only; anime/comic convention is 2). Ignored on SDXL/Flux.",
+    )
+
     # --- Local web UI (S8) ---
     ui_host: str = Field(
         default="127.0.0.1",
@@ -173,6 +248,9 @@ class Settings(BaseSettings):
     run_inpaint: bool = True
     run_clean: bool = True
     run_caption: bool = True
+    # Training is heavy and optional: off by default so `run-all` stays the
+    # dataset pipeline. `make-style-dataset train` runs it explicitly.
+    run_train: bool = False
 
 
 @lru_cache(maxsize=1)
