@@ -192,6 +192,9 @@ already proven on this box). ai-toolkit's in-training sampling is left **off**: 
 unlike the streamed training step — an unproven OOM risk on this 16 GB display GPU.
 The `sample.prompts` in the config double as the held-out eval set for the grid. (To
 enable in-training previews, first run a short sampling fit-check — see Fallbacks.)
+An automated runner for this grid lives in `scripts/eval_style_lora.py` — point it at
+the saved LoRA(s) and it renders the weight×prompt contact sheet + a report stub
+(`--dry-run` previews the layout with no GPU/ComfyUI).
 
 - **Held-out / foreign prompts** — subjects absent from the training crops. PASS =
   the comic style (linework, shading, palette) transfers while **no** specific
