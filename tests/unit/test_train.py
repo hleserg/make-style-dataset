@@ -187,12 +187,57 @@ def test_build_train_args_empty_base_model_raises(tmp_path: Path) -> None:
         )
 
 
-def test_build_train_args_unwired_family_raises(tmp_path: Path) -> None:
-    settings = _settings(tmp_path, train_model_type="flux", train_base_model="/m.safetensors")
-    with pytest.raises(NotImplementedError, match="flux"):
+def test_build_train_args_unknown_family_raises(tmp_path: Path) -> None:
+    # sd3 is a real sd-scripts family we have not wired -> unsupported
+    settings = _settings(tmp_path, train_model_type="sd3", train_base_model="/m.safetensors")
+    with pytest.raises(NotImplementedError, match="sd3"):
         train.build_train_args(
             settings, dataset_config=tmp_path / "d.toml", output_dir=tmp_path / "o", output_name="s"
         )
+
+
+def _flux_args(tmp_path: Path, **overrides: object) -> list[str]:
+    base: dict[str, object] = {
+        "train_model_type": "flux",
+        "train_base_model": "/flux/dit.safetensors",
+        "train_flux_clip_l": "/flux/clip_l.safetensors",
+        "train_flux_t5xxl": "/flux/t5xxl.safetensors",
+        "train_flux_ae": "/flux/ae.safetensors",
+    }
+    base.update(overrides)
+    settings = _settings(tmp_path, **base)
+    return train.build_train_args(
+        settings, dataset_config=tmp_path / "d.toml", output_dir=tmp_path / "o", output_name="s"
+    )
+
+
+def test_build_train_args_flux_recipe(tmp_path: Path) -> None:
+    args = _flux_args(tmp_path)
+    assert "--clip_l=/flux/clip_l.safetensors" in args
+    assert "--t5xxl=/flux/t5xxl.safetensors" in args
+    assert "--ae=/flux/ae.safetensors" in args
+    assert "--network_train_unet_only" in args
+    assert "--guidance_scale=1.0" in args
+    assert "--timestep_sampling=flux_shift" in args
+    assert "--model_prediction_type=raw" in args
+    assert "--fp8_base" in args
+    assert "--cache_text_encoder_outputs" in args  # default cache_latents True
+    assert "--blocks_to_swap=18" in args  # default
+    assert "--no_half_vae" not in args  # SDXL-only
+    assert not any(a.startswith("--clip_skip") for a in args)  # SD 1.5-only
+
+
+def test_build_train_args_flux_missing_components_raises(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="APP_TRAIN_FLUX_T5XXL"):
+        _flux_args(tmp_path, train_flux_t5xxl="")
+
+
+def test_build_train_args_flux_no_cache_no_swap(tmp_path: Path) -> None:
+    args = _flux_args(tmp_path, train_cache_latents=False, train_flux_blocks_to_swap=0)
+    assert not any(a.startswith("--cache_text_encoder_outputs") for a in args)
+    assert not any(a.startswith("--blocks_to_swap") for a in args)
+    # the constant recipe flags are still present
+    assert "--fp8_base" in args and "--timestep_sampling=flux_shift" in args
 
 
 def _sdxl_args(tmp_path: Path, **overrides: object) -> list[str]:
@@ -269,6 +314,11 @@ def test_build_launch_command_sdxl_entrypoint(tmp_path: Path) -> None:
     assert "train_network.py" not in cmd  # exact element, not the sd15 entrypoint
 
 
+def test_build_launch_command_flux_entrypoint(tmp_path: Path) -> None:
+    cmd = train.build_launch_command(_settings(tmp_path, train_model_type="flux"), [])
+    assert "flux_train_network.py" in cmd
+
+
 def test_resolve_output_name(tmp_path: Path) -> None:
     assert train.resolve_output_name(_settings(tmp_path, trigger_token="foo")) == "foo"
     assert (
@@ -328,6 +378,31 @@ def test_run_sdxl_uses_sdxl_entrypoint(tmp_path: Path, monkeypatch) -> None:
     assert "--no_half_vae" in fake.plan.command
     # SDXL/Flux use the larger bucket ceiling in the generated TOML
     assert "max_bucket_reso = 1536" in (ws.lora / "dataset.toml").read_text(encoding="utf-8")
+
+
+def test_run_flux_uses_flux_entrypoint(tmp_path: Path, monkeypatch) -> None:
+    settings = _settings(
+        tmp_path,
+        train_model_type="flux",
+        train_base_model="/flux/dit.safetensors",
+        train_flux_clip_l="/flux/clip_l.safetensors",
+        train_flux_t5xxl="/flux/t5xxl.safetensors",
+        train_flux_ae="/flux/ae.safetensors",
+        train_resolution=1024,
+    )
+    ws = Workspace(root=settings.workspace)
+    ws.ensure_base()
+    _seed_dataset(ws, settings)
+    fake = FakeTrainer()
+    monkeypatch.setattr(train, "make_trainer", lambda *_a, **_k: fake)
+
+    result = train.run(StageContext(workspace=ws, settings=settings))
+
+    assert result.produced == 1
+    assert fake.plan is not None
+    assert "flux_train_network.py" in fake.plan.command
+    assert "--fp8_base" in fake.plan.command
+    assert "--clip_l=/flux/clip_l.safetensors" in fake.plan.command
 
 
 def test_run_without_dataset_raises(tmp_path: Path) -> None:
