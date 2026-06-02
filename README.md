@@ -22,8 +22,9 @@ and size-filter, then caption and lay out the final dataset folder.
 
 ## Pipeline
 
-Six stages, each reading one workspace folder and writing the next. `00_pages`
-is the input drop; the other five are CLI subcommands:
+Each stage reads one workspace folder and writes the next. `00_pages` is the
+input drop; stages 1–5 are the dataset pipeline, and an optional stage 6
+(`train`) trains the LoRA. All are CLI subcommands:
 
 | # | Stage | Reads → writes | Does |
 |---|-------|----------------|------|
@@ -33,17 +34,20 @@ is the input drop; the other five are CLI subcommands:
 | 3 | `inpaint` | `01_panels`+`02_masks` → `03_inpainted` | Paint the bubbles away. |
 | 4 | `clean` | `03_inpainted` → `04_clean` | Drop near-duplicates and too-small panels. |
 | 5 | `caption` | `04_clean` → `05_dataset/<N>_<trigger>/` | Caption and lay out the kohya dataset. |
+| 6 | `train` *(opt-in)* | `05_dataset/…` → `06_lora/` | Train a style LoRA via kohya sd-scripts (SD 1.5 / SDXL / Flux). |
 
 The runner is **idempotent**: each stage drops a `.stage_complete` marker and is
 skipped on re-runs unless `--force`. See the
 [workspace layout contract](docs/architecture/WORKSPACE.md) and the
 [system overview](docs/architecture/SYSTEM.md).
 
-All six stages are implemented. `panels` and `clean` are CPU-only; the model
+All stages are implemented. `panels` and `clean` are CPU-only; the model
 stages — `bubbles` (YOLOv8-seg + EasyOCR), `inpaint` (ONNX Big-LaMa) and
 `caption` (WD14 ViT v3, ONNX) — need the optional **`gpu`** dependency group
-(see [GPU stages](#gpu-stages)). `run-all` prints a summary of how many
-artifacts each stage produced.
+(see [GPU stages](#gpu-stages)). `run-all` runs stages 1–5 and prints a summary;
+the opt-in `train` stage (`APP_RUN_TRAIN=false` by default) shells out to a
+separate [kohya sd-scripts](https://github.com/kohya-ss/sd-scripts) venv — see
+[Training a LoRA](#training-a-lora).
 
 ## Quickstart
 
@@ -54,6 +58,7 @@ bash scripts/setup.sh                # one-command setup; --no-gpu to skip the G
 uv run make-style-dataset ui         # the app: drop pages, Build, download .zip  (or: make ui)
 #   prefer the terminal? drop pages into workspace/00_pages/ and run:
 uv run make-style-dataset run-all    # build the dataset
+uv run make-style-dataset train      # optional: train the LoRA -> workspace/06_lora/
 ```
 
 **The manual way** (developers):
@@ -111,13 +116,29 @@ base image or a local CUDA/cuDNN install provides them).
 `bubbles`/`inpaint`/`caption` on the GPU host. Containerizing the heavy stages
 for the GPU machine is a planned follow-up.
 
+## Training a LoRA
+
+The opt-in `train` stage trains a style LoRA from the finished dataset by
+shelling out to a local [kohya sd-scripts](https://github.com/kohya-ss/sd-scripts)
+clone running in **its own venv** — never installed into this project's, so the
+trainer's `torch`/`numpy`/`Pillow` pins can't clash with ours. It supports three
+families (`APP_TRAIN_MODEL_TYPE`): **`sd15`**, **`sdxl`** (fits 16 GB cleanly),
+and **`flux`** (low-VRAM `--blocks_to_swap` + `--fp8_base`).
+
+Point `APP_TRAIN_SD_SCRIPTS_DIR` / `APP_TRAIN_BASE_MODEL` (and the `APP_TRAIN_*`
+knobs in `.env.example`) at your setup, verify with `make-style-dataset doctor`
+(it checks the clone, the base model, and that the trainer's torch advertises
+your GPU arch), then run `make-style-dataset train` or the app's **Train** step.
+Output lands in `06_lora/<trigger>.safetensors`. Full walkthrough:
+[User Guide → Training a LoRA](docs/USER_GUIDE.md#training-a-lora-optional).
+
 ## Project layout
 
 | Path | Purpose |
 |------|---------|
 | `src/make_style_dataset/cli.py` | thin argparse shell (subcommand per stage) |
 | `src/make_style_dataset/pipeline.py` | ordered stage registry + idempotent runner |
-| `src/make_style_dataset/stages/` | one module per stage (`panels`, `bubbles`, `inpaint`, `clean`, `caption`) |
+| `src/make_style_dataset/stages/` | one module per stage (`panels`, `bubbles`, `inpaint`, `clean`, `caption`, `train`) |
 | `src/make_style_dataset/workspace.py` | typed, single-root directory contract |
 | `src/make_style_dataset/config.py` | typed settings via `pydantic-settings` |
 | `src/make_style_dataset/observability/` | Sentry init (`send_default_pii=False`) + per-stage tags |

@@ -152,6 +152,83 @@ APP_DATASET_REPEATS=10         # число повторов kohya; задаёт
 
 ---
 
+## Обучение LoRA (опционально)
+
+Датасет — самая трудоёмкая часть. При желании инструмент может ещё и **обучить
+стилевую LoRA** локально — из только что собранного датасета.
+
+> **Это продвинутый необязательный шаг.** Нужна видеокарта NVIDIA и базовая
+> модель (чекпойнт Stable Diffusion / Flux) на диске. Обучение идёт небыстро —
+> от минут до часов, смотря какая модель и GPU.
+
+### Разовая настройка обучения
+
+Обучение идёт через **kohya sd-scripts** — отдельный инструмент в своём
+окружении Python (держим его отдельно, чтобы его библиотеки не конфликтовали с
+нашими). Настраивается один раз:
+
+```bash
+git clone https://github.com/kohya-ss/sd-scripts ~/sd-scripts
+cd ~/sd-scripts
+python -m venv venv && . venv/bin/activate
+# Для NVIDIA RTX 50-й серии (Blackwell) ставьте сборку PyTorch cu128:
+pip install torch --index-url https://download.pytorch.org/whl/cu128
+pip install -r requirements.txt
+deactivate
+```
+
+Потом укажите путь к нему и к базовой модели — откройте `.env` и задайте:
+
+```ini
+APP_TRAIN_SD_SCRIPTS_DIR=/home/you/sd-scripts
+APP_TRAIN_BASE_MODEL=/path/to/your/base-model.safetensors
+APP_TRAIN_MODEL_TYPE=sdxl        # sd15 | sdxl | flux
+```
+
+Проверьте готовность:
+
+```bash
+uv run make-style-dataset doctor
+```
+
+Строки обучения (`sd-scripts`, `base model`, `trainer torch`) должны быть `[ok]`
+— строка `trainer torch` подтверждает, что ядра под вашу GPU на месте.
+
+### Выберите семейство базовой модели
+
+Обучать можно на любом из трёх семейств — начните с простого, при желании
+переходите к сложному:
+
+| Семейство | Когда | Заметки |
+|---|---|---|
+| **SD 1.5** | быстрее всего, легче | Хорошо для быстрого первого прогона; качество постарше. |
+| **SDXL** | золотая середина | Чисто влезает в 16 ГБ; обычный выбор для стилевых LoRA (базы Illustrious / Pony / NoobAI). |
+| **Flux** | максимум качества | Впритык на 16 ГБ — нужны доп. пути `APP_TRAIN_FLUX_*` (CLIP-L, T5-XXL, VAE), и медленнее. |
+
+Задайте `APP_TRAIN_MODEL_TYPE` (для Flux ещё три пути `APP_TRAIN_FLUX_*` и
+`APP_TRAIN_MIXED_PRECISION=bf16`). Все ручки — в `.env.example`.
+
+### Запустите обучение
+
+**В приложении:** после сборки датасета нажмите **«Train a LoRA from this
+dataset →»**, выберите семейство и базовую модель, нажмите **▶ Train LoRA**. Лог
+идёт вживую; по завершении скачайте `.safetensors`.
+
+**Из командной строки:**
+
+```bash
+uv run make-style-dataset train
+```
+
+Прогресс по шагам (loss, шаги) печатается в терминал. Обученная LoRA окажется в
+**`workspace/06_lora/<trigger>.safetensors`** — закиньте её в ComfyUI / A1111 и
+вызывайте свой стиль триггер-словом.
+
+> **Видеокарта на 16 ГБ?** Держите batch size = 1; SDXL влезает с дефолтами. Для
+> Flux поднимайте `APP_TRAIN_FLUX_BLOCKS_TO_SWAP` (до 35), если не хватает памяти.
+
+---
+
 ## Если что-то не так
 
 | Что видите | Что происходит / что делать |
@@ -162,6 +239,8 @@ APP_DATASET_REPEATS=10         # число повторов kohya; задаёт
 | Очень медленно | Вы на CPU. ИИ-шагам нужна видеокарта NVIDIA. |
 | `command not found: uv` | Закройте и снова откройте терминал, потом повторите (установка добавила `uv` в PATH). |
 | Хочу начать заново | Удалите папку `workspace/` и выполните `uv run make-style-dataset init`. |
+| Обучение: `Error: no dataset images` | Сначала соберите датасет (шаг `train` читает `05_dataset/`). |
+| Обучение: `doctor` пишет `[--] sd-scripts` / `trainer torch` | Клон kohya sd-scripts или его GPU-venv не настроен — см. *Обучение LoRA* выше. |
 
 ---
 
@@ -178,6 +257,7 @@ uv run make-style-dataset ui           # приложение: бросить с
 #   положите страницы в workspace/00_pages/
 uv run make-style-dataset run-all      # каждый раз
 #   заберите workspace/05_dataset/<N>_<trigger>/
+uv run make-style-dataset train        # опционально: обучить LoRA -> workspace/06_lora/
 ```
 
 Технические детали каждой стадии — в [README-ru.md](../README-ru.md) и

@@ -16,6 +16,7 @@ so the whole pipeline can be relocated or sandboxed by changing one setting.
 | `03_inpainted/` | `inpaint` | Panels with bubbles inpainted away. |
 | `04_clean/` | `clean` | Deduplicated, size-filtered panels. |
 | `05_dataset/<N>_<trigger>/` | `caption` | kohya-ready images + `.txt` caption sidecars. |
+| `06_lora/` | `train` | Trained style-LoRA weights (`.safetensors`) + the generated `dataset.toml`. Opt-in — off in `run-all`. |
 | `manual_review/` | *(any stage)* | Artifacts kicked out for a human to inspect. |
 
 `<N>` is `APP_DATASET_REPEATS` and `<trigger>` is `APP_TRIGGER_TOKEN`, so the
@@ -33,9 +34,16 @@ flowchart LR
     M -->|inpaint| Inp[03_inpainted]
     Inp -->|clean| Cl[04_clean]
     Cl -->|caption| DS[05_dataset/N_trigger]
+    DS -.->|train · opt-in| L[06_lora]
     Pan -.too small / dup.-> MR[manual_review]
     Cl -.too small / dup.-> MR
 ```
+
+The `train` stage (stage 6) is **off by default** (`APP_RUN_TRAIN=false`), so
+`run-all` stops at `05_dataset/`. It is run explicitly — `make-style-dataset
+train` or the app's *Train* step — and shells out to a separate
+[kohya sd-scripts](https://github.com/kohya-ss/sd-scripts) venv (see the
+[User guide](../USER_GUIDE.md#training-a-lora-optional)).
 
 ## Idempotency
 
