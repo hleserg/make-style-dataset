@@ -36,6 +36,7 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         env_prefix="APP_",
         extra="ignore",
+        populate_by_name=True,  # allow constructing aliased fields (e.g. hf_token) by name
     )
 
     environment: str = "development"
@@ -73,7 +74,7 @@ class Settings(BaseSettings):
     )
     vlm_prompt_style: str = Field(
         default="rich",
-        description="VLM caption style: 'rich' (more content, cleaner style residual) or 'optimal'.",
+        description="VLM caption style: 'rich' (more content, cleaner residual) or 'optimal'.",
     )
     vlm_concurrency: int = Field(
         default=8, ge=1, description="Concurrent proxy calls when re-captioning a dataset."

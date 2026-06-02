@@ -98,8 +98,8 @@ def recaption_dataset(
     style: str,
     client: CaptionClient,
     max_workers: int = 8,
-    retries: int = 3,
-    backoff: float = 1.5,
+    retries: int = 5,
+    backoff: float = 2.0,
     sleep=time.sleep,
 ) -> RecaptionResult:
     """Rewrite every image's ``.txt`` in ``dataset_dir`` with a VLM prose caption.

@@ -13,13 +13,18 @@ import zipfile
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from make_style_dataset.config import Settings
 from make_style_dataset.media import IMAGE_SUFFIXES, image_files
 from make_style_dataset.pipeline import DONE_MARKER, STAGES, run_stage
 from make_style_dataset.stages.base import Stage, StageContext, StageResult
 from make_style_dataset.stages.clean import _decode_bgr, _write_png, denoise, upscale_to
+from make_style_dataset.vlm_caption import RecaptionResult, recaption_dataset
 from make_style_dataset.workspace import Workspace
+
+if TYPE_CHECKING:
+    from make_style_dataset.proxy import CaptionClient
 
 #: Glyphs prefixed to each progress line, one per phase.
 _PHASE_GLYPH = {"running": "…", "done": "✓", "skipped": "•", "error": "✗"}
@@ -162,6 +167,45 @@ def release_gpu_memory() -> None:
     if torch.cuda.is_available():  # pragma: no cover - needs a real GPU present
         torch.cuda.empty_cache()
         torch.cuda.ipc_collect()
+
+
+def recaption_training_dir(
+    settings: Settings,
+    *,
+    model: str,
+    style: str = "rich",
+    client: CaptionClient | None = None,
+) -> RecaptionResult:
+    """Re-caption the assembled dataset's ``.txt`` sidecars via the Gemini proxy.
+
+    Used by the UI 'Re-caption' button (``model='gemini-2.5-pro'``) and testable
+    with an injected ``client``. Returns a friendly :class:`RecaptionResult` (no
+    raise) when the HF token or the dataset folder is missing, so the UI can show
+    the message instead of a traceback.
+    """
+    if not settings.hf_token and client is None:
+        return RecaptionResult(
+            0, 0, ["No HF token — put HF_TOKEN (read access to the proxy) in .env."]
+        )
+    target = Workspace(root=settings.workspace).training_dir(
+        settings.dataset_repeats, settings.trigger_token
+    )
+    if not target.is_dir():
+        return RecaptionResult(
+            0, 0, [f"No dataset folder yet ({target.name}) — build the dataset first."]
+        )
+    if client is None:  # pragma: no cover - constructs the real network client
+        from make_style_dataset.proxy import GeminiProxyClient
+
+        client = GeminiProxyClient(settings.hf_token)
+    return recaption_dataset(
+        target,
+        trigger=settings.trigger_token,
+        model=model,
+        style=style,
+        client=client,
+        max_workers=settings.vlm_concurrency,
+    )
 
 
 def zip_training_dir(dataset_dir: Path, out_path: Path) -> Path | None:

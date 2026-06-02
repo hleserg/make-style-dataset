@@ -31,6 +31,7 @@ from make_style_dataset.ui.service import (
     gallery_items,
     lora_files,
     promote_to_clean,
+    recaption_training_dir,
     release_gpu_memory,
     run_pipeline_stream,
     save_uploaded_pages,
@@ -96,6 +97,13 @@ def build_demo(ctx: StageContext) -> gr.Blocks:
             download_file = gr.File(label="Download dataset (.zip)")
             with gr.Tab("Dataset"):
                 result_gallery = gr.Gallery(label="Dataset images", columns=4, height="auto")
+                gr.Markdown(
+                    "Captions come from the WD14 tagger. **Re-caption with a VLM** (Gemini Pro) "
+                    "for trigger-first prose that describes the content and never names the style "
+                    "— cleaner for a Flux style LoRA. Runs via the proxy."
+                )
+                recaption_btn = gr.Button("📝 Re-caption with VLM (Pro)")
+                recaption_status = gr.Markdown()
             with gr.Tab("Manual review"):
                 gr.Markdown(
                     "Panels the auto-clean set aside (too small, or a tricky crop). "
@@ -256,6 +264,25 @@ def build_demo(ctx: StageContext) -> gr.Blocks:
             _rescue,
             inputs=[trigger_in, repeats_in, review_names],
             outputs=[review_gallery, review_names, review_select, rescue_status],
+        )
+
+        def _recaption(trigger: str, repeats: float):
+            run_settings = build_settings(settings, trigger, repeats)
+            result = recaption_training_dir(run_settings, model="gemini-2.5-pro", style="rich")
+            training = make_context(run_settings).workspace.training_dir(
+                run_settings.dataset_repeats, run_settings.trigger_token
+            )
+            if result.written:
+                note = f"✅ Re-captioned **{result.written}** image(s) with Gemini Pro (prose)"
+                note += f" — {result.failed} failed." if result.failed else "."
+                if result.errors:
+                    note += " " + "; ".join(result.errors[:3])
+            else:
+                note = "⚠️ " + (result.errors[0] if result.errors else "nothing to do.")
+            return gallery_items(training), note
+
+        recaption_btn.click(
+            _recaption, inputs=[trigger_in, repeats_in], outputs=[result_gallery, recaption_status]
         )
 
         to_step4.click(lambda: gr.update(visible=True), outputs=[step4])

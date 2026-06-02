@@ -359,3 +359,48 @@ def test_promote_to_clean_no_selection_keeps_caption_marker(tmp_path: Path) -> N
 
     assert promote_to_clean(ws, [], settings) == 0
     assert marker.exists()  # nothing promoted -> marker untouched
+
+
+# --- recaption_training_dir (VLM re-caption via proxy) ---------------------
+
+
+class _StubCaptionClient:
+    def caption(self, model: str, prompt: str, image_bytes: bytes) -> dict:
+        return {"caption": "a hero on a hill"}
+
+
+def test_recaption_training_dir_no_token() -> None:
+    from make_style_dataset.ui.service import recaption_training_dir
+
+    result = recaption_training_dir(Settings(hf_token=""), model="gemini-2.5-pro")
+    assert (result.written, result.failed) == (0, 0)
+    assert "No HF token" in result.errors[0]
+
+
+def test_recaption_training_dir_no_dataset(tmp_path: Path) -> None:
+    from make_style_dataset.ui.service import recaption_training_dir
+
+    settings = Settings(
+        hf_token="t", workspace=tmp_path, dataset_repeats=10, trigger_token="cmcstyle"
+    )
+    result = recaption_training_dir(settings, model="gemini-2.5-pro", client=_StubCaptionClient())
+    assert result.written == 0
+    assert "build the dataset" in result.errors[0].lower()
+
+
+def test_recaption_training_dir_writes(tmp_path: Path) -> None:
+    from make_style_dataset.ui.service import recaption_training_dir
+
+    settings = Settings(
+        hf_token="t", workspace=tmp_path, dataset_repeats=10, trigger_token="cmcstyle"
+    )
+    dataset = Workspace(root=tmp_path).training_dir(10, "cmcstyle")
+    dataset.mkdir(parents=True)
+    (dataset / "p.png").write_bytes(b"img")
+
+    result = recaption_training_dir(
+        settings, model="gemini-2.5-pro", style="rich", client=_StubCaptionClient()
+    )
+
+    assert result.written == 1
+    assert (dataset / "p.txt").read_text(encoding="utf-8").strip() == "cmcstyle, a hero on a hill"
