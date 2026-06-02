@@ -187,13 +187,51 @@ def test_build_train_args_empty_base_model_raises(tmp_path: Path) -> None:
         )
 
 
-@pytest.mark.parametrize("family", ["sdxl", "flux"])
-def test_build_train_args_unwired_family_raises(tmp_path: Path, family: str) -> None:
-    settings = _settings(tmp_path, train_model_type=family, train_base_model="/m.safetensors")
-    with pytest.raises(NotImplementedError, match=family):
+def test_build_train_args_unwired_family_raises(tmp_path: Path) -> None:
+    settings = _settings(tmp_path, train_model_type="flux", train_base_model="/m.safetensors")
+    with pytest.raises(NotImplementedError, match="flux"):
         train.build_train_args(
             settings, dataset_config=tmp_path / "d.toml", output_dir=tmp_path / "o", output_name="s"
         )
+
+
+def _sdxl_args(tmp_path: Path, **overrides: object) -> list[str]:
+    settings = _settings(
+        tmp_path, train_model_type="sdxl", train_base_model="/m.safetensors", **overrides
+    )
+    return train.build_train_args(
+        settings, dataset_config=tmp_path / "d.toml", output_dir=tmp_path / "o", output_name="s"
+    )
+
+
+def test_build_train_args_sdxl_unet_only_default(tmp_path: Path) -> None:
+    args = _sdxl_args(tmp_path)
+    assert "--no_half_vae" in args  # mandatory for SDXL
+    assert "--network_module=networks.lora" in args
+    assert "--network_train_unet_only" in args  # default train_unet_only=True
+    assert "--cache_text_encoder_outputs" in args
+    assert "--cache_text_encoder_outputs_to_disk" in args
+    assert not any(a.startswith("--clip_skip") for a in args)  # SD 1.5 only
+    assert not any(a.startswith("--text_encoder_lr") for a in args)
+
+
+def test_build_train_args_sdxl_train_text_encoders(tmp_path: Path) -> None:
+    args = _sdxl_args(tmp_path, train_unet_only=False, train_text_encoder_lr=5e-5)
+    assert "--no_half_vae" in args
+    assert "--network_train_unet_only" not in args
+    # TE-output caching is forbidden with TE training (kohya asserts) -> dropped
+    assert not any(a.startswith("--cache_text_encoder_outputs") for a in args)
+    # nargs=* : the flag is followed by two separate values
+    idx = args.index("--text_encoder_lr")
+    assert args[idx + 1] == "5e-05" and args[idx + 2] == "5e-05"
+
+
+def test_build_train_args_sdxl_train_te_without_lr(tmp_path: Path) -> None:
+    # train_unet_only False but no TE lr set -> no --text_encoder_lr, no cache flags
+    args = _sdxl_args(tmp_path, train_unet_only=False)
+    assert "--network_train_unet_only" not in args
+    assert not any(a.startswith("--text_encoder_lr") for a in args)
+    assert not any(a.startswith("--cache_text_encoder_outputs") for a in args)
 
 
 # --- launch command / interpreter / output name ---------------------------
@@ -223,6 +261,12 @@ def test_build_launch_command_shape(tmp_path: Path) -> None:
 def test_build_launch_command_unknown_family_raises(tmp_path: Path) -> None:
     with pytest.raises(NotImplementedError):
         train.build_launch_command(_settings(tmp_path, train_model_type="bogus"), [])
+
+
+def test_build_launch_command_sdxl_entrypoint(tmp_path: Path) -> None:
+    cmd = train.build_launch_command(_settings(tmp_path, train_model_type="sdxl"), ["--foo=1"])
+    assert "sdxl_train_network.py" in cmd
+    assert "train_network.py" not in cmd  # exact element, not the sd15 entrypoint
 
 
 def test_resolve_output_name(tmp_path: Path) -> None:
@@ -264,6 +308,26 @@ def test_run_trains_into_lora_dir(tmp_path: Path, monkeypatch) -> None:
     assert "train_network.py" in fake.plan.command
     assert fake.plan.cwd == settings.train_sd_scripts_dir
     assert fake.plan.output_path == ws.lora / "mystyle.safetensors"
+
+
+def test_run_sdxl_uses_sdxl_entrypoint(tmp_path: Path, monkeypatch) -> None:
+    settings = _settings(
+        tmp_path, train_model_type="sdxl", train_base_model="/m.safetensors", train_resolution=1024
+    )
+    ws = Workspace(root=settings.workspace)
+    ws.ensure_base()
+    _seed_dataset(ws, settings)
+    fake = FakeTrainer()
+    monkeypatch.setattr(train, "make_trainer", lambda *_a, **_k: fake)
+
+    result = train.run(StageContext(workspace=ws, settings=settings))
+
+    assert result.produced == 1
+    assert fake.plan is not None
+    assert "sdxl_train_network.py" in fake.plan.command
+    assert "--no_half_vae" in fake.plan.command
+    # SDXL/Flux use the larger bucket ceiling in the generated TOML
+    assert "max_bucket_reso = 1536" in (ws.lora / "dataset.toml").read_text(encoding="utf-8")
 
 
 def test_run_without_dataset_raises(tmp_path: Path) -> None:
