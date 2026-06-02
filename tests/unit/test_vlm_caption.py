@@ -124,3 +124,34 @@ def test_recaption_retries_transient_then_succeeds(tmp_path: Path) -> None:
     assert (tmp_path / "a.txt").read_text(encoding="utf-8").strip() == "t, a knight"
     assert slept  # backed off once before the retry
     assert len(client.calls) == 2
+
+
+def test_recaption_retries_on_client_exception(tmp_path: Path) -> None:
+    """A network exception from the real client must be caught + retried, not crash."""
+    (tmp_path / "a.png").write_bytes(b"x")
+
+    class FlakyRaise:
+        def __init__(self) -> None:
+            self.n = 0
+
+        def caption(self, model: str, prompt: str, image_bytes: bytes) -> dict:
+            self.n += 1
+            if self.n == 1:
+                raise TimeoutError("write operation timed out")
+            return {"caption": "a knight"}
+
+    client = FlakyRaise()
+    slept: list[float] = []
+    result = recaption_dataset(
+        tmp_path,
+        trigger="t",
+        model="m",
+        style="rich",
+        client=client,
+        max_workers=1,
+        sleep=slept.append,
+    )
+
+    assert result.written == 1
+    assert client.n == 2  # raised once, retried, then succeeded
+    assert (tmp_path / "a.txt").read_text(encoding="utf-8").strip() == "t, a knight"

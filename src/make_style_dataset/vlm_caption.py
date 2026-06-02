@@ -70,9 +70,15 @@ def normalize_caption(text: str, trigger: str) -> str:
 
 
 def _is_transient(error: object) -> bool:
-    """True for retryable proxy/Gemini errors (5xx overload, 429 rate limit)."""
+    """True for retryable errors (5xx, 429, network/timeout exceptions, empty/parse).
+
+    Definitive client errors — HTTP 4xx other than 429 (400/401/403/404) — are not
+    retried because they won't fix themselves; everything else is worth a retry.
+    """
     err = str(error)
-    return err.startswith("http_5") or err == "http_429" or err in {"empty_response", "URLError"}
+    if not err:
+        return False
+    return not (err.startswith("http_4") and err != "http_429")
 
 
 @dataclass(frozen=True)
@@ -110,8 +116,11 @@ def recaption_dataset(
         data = path.read_bytes()
         result: dict[str, object] = {"error": "not_run"}
         for attempt in range(retries):
-            result = client.caption(model, prompt, data)
-            if not _is_transient(result.get("error", "")) or "error" not in result:
+            try:
+                result = client.caption(model, prompt, data)
+            except Exception as exc:  # network/timeout from the real client -> retry
+                result = {"error": "exception", "detail": f"{type(exc).__name__}: {exc}"[:160]}
+            if "error" not in result or not _is_transient(result["error"]):
                 break
             sleep(backoff * (attempt + 1))
         text = result.get("caption")
