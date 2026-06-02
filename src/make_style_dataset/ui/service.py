@@ -13,11 +13,18 @@ import zipfile
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from make_style_dataset.config import Settings
 from make_style_dataset.media import IMAGE_SUFFIXES, image_files
-from make_style_dataset.pipeline import STAGES, run_stage
+from make_style_dataset.pipeline import DONE_MARKER, STAGES, run_stage
 from make_style_dataset.stages.base import Stage, StageContext, StageResult
+from make_style_dataset.stages.clean import _decode_bgr, _write_png, denoise, upscale_to
+from make_style_dataset.vlm_caption import RecaptionResult, recaption_dataset
+from make_style_dataset.workspace import Workspace
+
+if TYPE_CHECKING:
+    from make_style_dataset.proxy import CaptionClient
 
 #: Glyphs prefixed to each progress line, one per phase.
 _PHASE_GLYPH = {"running": "…", "done": "✓", "skipped": "•", "error": "✗"}
@@ -101,6 +108,104 @@ def gallery_items(directory: Path) -> list[tuple[str, str]]:
         caption = sidecar.read_text(encoding="utf-8").strip() if sidecar.is_file() else path.name
         items.append((str(path), caption))
     return items
+
+
+def promote_to_clean(workspace: Workspace, names: Iterable[str], settings: Settings) -> int:
+    """Rescue hand-picked ``manual_review`` panels into ``04_clean``; return the count.
+
+    For each selected file name (basename only — directory parts are stripped, so a
+    malicious gallery value cannot escape ``manual_review``): upscale it to
+    ``target_side`` exactly like the clean stage, write it into ``04_clean``, then
+    delete the original and its ``<stem>.reason.txt`` from ``manual_review``. When
+    anything is promoted, the caption stage's completion marker is removed so the
+    next **Build** re-captions the enlarged clean set *without* re-running the clean
+    stage (which would regenerate ``04_clean`` and wipe the rescued panels).
+    """
+    clean_dir = workspace.clean
+    clean_dir.mkdir(parents=True, exist_ok=True)
+    review = workspace.manual_review
+    promoted = 0
+    for name in names:
+        src = review / Path(name).name
+        if not src.is_file() or src.suffix.lower() not in IMAGE_SUFFIXES:
+            continue
+        image = _decode_bgr(src)
+        if image is None:
+            continue
+        if settings.clean_denoise:
+            image = denoise(image)
+        image = upscale_to(image, settings.target_side)
+        _write_png(image, clean_dir / f"{src.stem}.png")
+        src.unlink()
+        src.with_suffix(".reason.txt").unlink(missing_ok=True)
+        promoted += 1
+    if promoted:
+        marker = (
+            workspace.training_dir(settings.dataset_repeats, settings.trigger_token) / DONE_MARKER
+        )
+        marker.unlink(missing_ok=True)
+    return promoted
+
+
+def release_gpu_memory() -> None:
+    """Best-effort release of VRAM held by the pipeline's model backends.
+
+    The model stages (YOLO bubble detector, LaMa inpainter, WD14 tagger) load
+    weights into the GPU. In the long-running UI process those linger after a
+    build; freeing them lets a following LoRA training claim the whole GPU (Flux
+    needs nearly all 16 GB). Forces a GC pass so out-of-scope ONNX/torch sessions
+    are finalised, then empties torch's CUDA cache. No-op when torch / a GPU is
+    absent (CPU-only env or CI).
+    """
+    import gc
+
+    gc.collect()
+    try:
+        import torch
+    except Exception:  # pragma: no cover - torch is an optional gpu-group dep
+        return
+    if torch.cuda.is_available():  # pragma: no cover - needs a real GPU present
+        torch.cuda.empty_cache()
+        torch.cuda.ipc_collect()
+
+
+def recaption_training_dir(
+    settings: Settings,
+    *,
+    model: str,
+    style: str = "rich",
+    client: CaptionClient | None = None,
+) -> RecaptionResult:
+    """Re-caption the assembled dataset's ``.txt`` sidecars via the Gemini proxy.
+
+    Used by the UI 'Re-caption' button (``model='gemini-2.5-pro'``) and testable
+    with an injected ``client``. Returns a friendly :class:`RecaptionResult` (no
+    raise) when the HF token or the dataset folder is missing, so the UI can show
+    the message instead of a traceback.
+    """
+    if not settings.hf_token and client is None:
+        return RecaptionResult(
+            0, 0, ["No HF token — put HF_TOKEN (read access to the proxy) in .env."]
+        )
+    target = Workspace(root=settings.workspace).training_dir(
+        settings.dataset_repeats, settings.trigger_token
+    )
+    if not target.is_dir():
+        return RecaptionResult(
+            0, 0, [f"No dataset folder yet ({target.name}) — build the dataset first."]
+        )
+    if client is None:  # pragma: no cover - constructs the real network client
+        from make_style_dataset.proxy import GeminiProxyClient
+
+        client = GeminiProxyClient(settings.hf_token)
+    return recaption_dataset(
+        target,
+        trigger=settings.trigger_token,
+        model=model,
+        style=style,
+        client=client,
+        max_workers=settings.vlm_concurrency,
+    )
 
 
 def zip_training_dir(dataset_dir: Path, out_path: Path) -> Path | None:

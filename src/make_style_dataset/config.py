@@ -11,7 +11,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -36,6 +36,7 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         env_prefix="APP_",
         extra="ignore",
+        populate_by_name=True,  # allow constructing aliased fields (e.g. hf_token) by name
     )
 
     environment: str = "development"
@@ -61,6 +62,24 @@ class Settings(BaseSettings):
         description="kohya repeat count; the dataset folder is named '<repeats>_<trigger>'.",
     )
 
+    # --- VLM re-caption (Gemini prose via the proxy Space) ---
+    hf_token: str = Field(
+        default="",
+        validation_alias=AliasChoices("HF_TOKEN", "HUGGINGFACE_TOKEN", "HUGGINGFACE_HUB_TOKEN"),
+        description="HF token (read access) for the private Gemini proxy Space. Not APP_-prefixed.",
+    )
+    vlm_model: str = Field(
+        default="gemini-2.5-flash",
+        description="Gemini model for VLM re-captioning (agent default; the UI button uses pro).",
+    )
+    vlm_prompt_style: str = Field(
+        default="rich",
+        description="VLM caption style: 'rich' (more content, cleaner residual) or 'optimal'.",
+    )
+    vlm_concurrency: int = Field(
+        default=8, ge=1, description="Concurrent proxy calls when re-captioning a dataset."
+    )
+
     # --- Pipeline: stage thresholds ---
     min_panel_area: int = Field(
         default=10_000,
@@ -83,15 +102,28 @@ class Settings(BaseSettings):
         le=1.0,
         description="A lone panel covering at least this fraction of the page is a splash.",
     )
+    panel_resplit: bool = Field(
+        default=True,
+        description=(
+            "Recursively X-Y-cut merged panel boxes along clean interior gutters, to "
+            "recover touching / thin-gutter panels the contour pass lumped together. "
+            "Coordinates-only (no resize). Disable if it over-splits busy artwork."
+        ),
+    )
     dedup_hamming_distance: int = Field(
         default=6,
         ge=0,
         description="Perceptual-hash distance below which two panels are near-duplicates.",
     )
     min_side_px: int = Field(
-        default=512,
+        default=256,
         ge=1,
-        description="Drop panels whose shorter side is below this many pixels.",
+        description=(
+            "Floor below which a panel is too small to upscale cleanly and is routed "
+            "to manual_review. Panels at or above it are kept and Lanczos-upscaled to "
+            "target_side. Keep this well under target_side (a comic page yields many "
+            "300-500px panels): a high floor silently dumps most of the dataset."
+        ),
     )
     target_side: int = Field(
         default=1024,
@@ -115,9 +147,13 @@ class Settings(BaseSettings):
         description="Comma-separated EasyOCR language codes for SFX/text detection (e.g. 'en,ja').",
     )
     mask_dilation_px: int = Field(
-        default=5,
+        default=10,
         ge=0,
-        description="Dilate the bubble+text mask by this many px to catch outlines/letter strokes.",
+        description=(
+            "Dilate the bubble+text mask by this many px so the inpaint also eats the "
+            "bubble outline and reaches the art around it (a small value leaves a white "
+            "ring/empty bubble). Raise it if outlines survive; lower it if fills bleed."
+        ),
     )
     max_mask_coverage: float = Field(
         default=0.6,

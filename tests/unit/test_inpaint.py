@@ -74,44 +74,66 @@ def test_inpaint_backend_default_is_lama(tmp_path: Path) -> None:
 # --- pure tensor pre/post-processing --------------------------------------
 
 
-def test_lama_inputs_resizes_to_model_size() -> None:
-    image = np.full((48, 64, 3), 200, dtype=np.uint8)  # H=48, W=64 BGR
+def test_letterbox_inputs_pads_to_square_then_model_size() -> None:
+    image = np.full((48, 64, 3), 200, dtype=np.uint8)  # H=48, W=64 BGR (non-square)
     mask = np.zeros((48, 64), dtype=np.uint8)
     mask[10:20, 10:20] = 255
-    feed = inpaint.lama_inputs(image, mask, (32, 32))
+    feed, box = inpaint.letterbox_inputs(image, mask, (32, 32))
     assert feed["image"].shape == (1, 3, 32, 32)
     assert feed["mask"].shape == (1, 1, 32, 32)
     assert feed["image"].dtype == np.float32
     assert feed["image"].min() >= 0.0
     assert feed["image"].max() <= 1.0
     assert set(np.unique(feed["mask"]).tolist()) <= {0.0, 1.0}  # binarized
+    # padded to a square of the longer side; only the short axis gets padding
+    assert box.edge == 64
+    assert (box.height, box.width) == (48, 64)
+    assert box.pad_top == 8 and box.pad_left == 0
 
 
-def test_lama_inputs_binarizes_gray_mask() -> None:
-    image = np.zeros((8, 8, 3), dtype=np.uint8)
+def test_letterbox_inputs_binarizes_gray_mask() -> None:
+    image = np.zeros((8, 8, 3), dtype=np.uint8)  # already square -> identity resize
     mask = np.zeros((8, 8), dtype=np.uint8)
     mask[0, 0] = 100  # below threshold -> 0
     mask[1, 1] = 200  # above threshold -> 1
-    feed = inpaint.lama_inputs(image, mask, (8, 8))  # identity resize keeps coords
+    feed, _box = inpaint.letterbox_inputs(image, mask, (8, 8))
     assert feed["mask"][0, 0, 0, 0] == 0.0
     assert feed["mask"][0, 0, 1, 1] == 1.0
 
 
-def test_lama_output_clips_and_converts_rgb_to_bgr() -> None:
+def test_unletterbox_output_clips_and_converts_rgb_to_bgr() -> None:
     # CHW RGB with an out-of-range value in the red channel.
     raw = np.zeros((3, 4, 4), dtype=np.float32)
     raw[0] = 300.0  # R way over 255 -> must clip to 255, not wrap
-    out = inpaint.lama_output_to_bgr(raw, width=4, height=4)
+    box = inpaint.Letterbox(edge=4, pad_top=0, pad_left=0, height=4, width=4)
+    out = inpaint.unletterbox_output(raw, box)
     assert out.shape == (4, 4, 3)
     assert out.dtype == np.uint8
     # In BGR, pure red is (0, 0, 255).
     assert tuple(int(c) for c in out[0, 0]) == (0, 0, 255)
 
 
-def test_lama_output_drops_batch_dim_and_resizes() -> None:
-    raw = np.zeros((1, 3, 8, 8), dtype=np.float32)  # NCHW with batch
-    out = inpaint.lama_output_to_bgr(raw, width=20, height=16)
-    assert out.shape == (16, 20, 3)  # resized to native (H, W)
+def test_unletterbox_output_crops_back_to_native_no_stretch() -> None:
+    raw = np.zeros((1, 3, 8, 8), dtype=np.float32)  # square NCHW model output
+    box = inpaint.Letterbox(edge=20, pad_top=2, pad_left=0, height=16, width=20)
+    out = inpaint.unletterbox_output(raw, box)
+    assert out.shape == (16, 20, 3)  # native (H, W) — padding cropped, not stretched
+
+
+def test_letterbox_roundtrip_preserves_aspect_no_deformation() -> None:
+    # A tall non-square panel with a thin vertical stripe. Letterbox -> identity
+    # "model" -> unletterbox must return it at native size with the stripe still
+    # ~2px wide and vertical (a stretch would widen/smear it).
+    image = np.zeros((30, 10, 3), dtype=np.uint8)
+    image[:, 4:6] = 255  # 2px white vertical stripe down the middle
+    mask = np.zeros((30, 10), dtype=np.uint8)
+    feed, box = inpaint.letterbox_inputs(image, mask, (30, 30))  # model size == edge -> identity
+    raw = feed["image"][0] * 255.0  # treat the fed RGB as the model's output
+    out = inpaint.unletterbox_output(raw, box)
+    assert out.shape == (30, 10, 3)  # native, not square, not stretched
+    white_fraction = (out[:, :, 0] > 128).mean(axis=0)  # per-column white share
+    assert white_fraction[4] > 0.8 and white_fraction[5] > 0.8
+    assert white_fraction[0] < 0.2 and white_fraction[9] < 0.2
 
 
 def test_composite_takes_painted_only_in_mask() -> None:

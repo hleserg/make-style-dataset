@@ -18,6 +18,8 @@ at package import time, so the rest of the package stays Gradio-free.
 # pyright: reportMissingImports=false, reportAttributeAccessIssue=false
 from __future__ import annotations
 
+from pathlib import Path
+
 import gradio as gr
 
 from make_style_dataset.pipeline import make_context, summarize_run
@@ -28,6 +30,9 @@ from make_style_dataset.ui.service import (
     build_train_settings,
     gallery_items,
     lora_files,
+    promote_to_clean,
+    recaption_training_dir,
+    release_gpu_memory,
     run_pipeline_stream,
     save_uploaded_pages,
     zip_training_dir,
@@ -92,13 +97,32 @@ def build_demo(ctx: StageContext) -> gr.Blocks:
             download_file = gr.File(label="Download dataset (.zip)")
             with gr.Tab("Dataset"):
                 result_gallery = gr.Gallery(label="Dataset images", columns=4, height="auto")
+                gr.Markdown(
+                    "Captions come from the WD14 tagger. **Re-caption with a VLM** (Gemini Pro) "
+                    "for trigger-first prose that describes the content and never names the style "
+                    "— cleaner for a Flux style LoRA. Runs via the proxy."
+                )
+                recaption_btn = gr.Button("📝 Re-caption with VLM (Pro)")
+                recaption_status = gr.Markdown()
             with gr.Tab("Manual review"):
                 gr.Markdown(
-                    "Pages too tricky to auto-slice land here. Crop the good panels "
-                    "by hand into `04_clean/` and re-build to caption them — or ignore "
-                    "them if you already have enough."
+                    "Panels the auto-clean set aside (too small, or a tricky crop). "
+                    "**Click the good ones** to select them, then **Send → 04_clean** — "
+                    "they're upscaled and folded into the dataset on your next **Build** "
+                    "(no file hunting). Re-run Build to caption them."
                 )
                 review_gallery = gr.Gallery(label="Needs a human", columns=4, height="auto")
+                review_names = gr.State([])
+                review_select = gr.Dropdown(
+                    label="Selected to rescue (click thumbnails above, or pick here)",
+                    multiselect=True,
+                    choices=[],
+                    interactive=True,
+                )
+                with gr.Row():
+                    rescue_btn = gr.Button("✅ Send selected → 04_clean", variant="primary")
+                    rescue_all_btn = gr.Button("Send all")
+                rescue_status = gr.Markdown()
             to_step4 = gr.Button("Train a LoRA from this dataset →")
 
         # --- Step 4: train (optional) -------------------------------------
@@ -162,10 +186,15 @@ def build_demo(ctx: StageContext) -> gr.Blocks:
                 lines.append(progress.line)
                 yield {build_log: "\n".join(lines)}
 
+            release_gpu_memory()  # drop model VRAM so a following Flux train gets the whole GPU
+            lines.append("Freed GPU memory (model stages no longer hold VRAM).")
+            yield {build_log: "\n".join(lines)}
+
             training = run_ctx.workspace.training_dir(
                 run_settings.dataset_repeats, run_settings.trigger_token
             )
             zip_path = zip_training_dir(training, run_ctx.workspace.root / f"{training.name}.zip")
+            review = [Path(p).name for p, _ in gallery_items(run_ctx.workspace.manual_review)]
             lines += ["", "Finished — see the Result step below."]
             yield {
                 build_log: "\n".join(lines),
@@ -173,14 +202,87 @@ def build_demo(ctx: StageContext) -> gr.Blocks:
                 summary_md: f"```\n{summarize_run(run_ctx)}\n```",
                 result_gallery: gallery_items(training),
                 review_gallery: gallery_items(run_ctx.workspace.manual_review),
+                review_names: review,
+                review_select: gr.update(choices=review, value=[]),
                 download_file: str(zip_path) if zip_path else None,
             }
 
         build_btn.click(
             _build,
             inputs=[trigger_in, repeats_in, files_in],
-            outputs=[build_log, step3, summary_md, result_gallery, review_gallery, download_file],
+            outputs=[
+                build_log,
+                step3,
+                summary_md,
+                result_gallery,
+                review_gallery,
+                review_names,
+                review_select,
+                download_file,
+            ],
             api_name="build",
+        )
+
+        def _select_review(names: list[str], current: list[str], evt: gr.SelectData):
+            """Add the clicked manual_review thumbnail to the rescue selection."""
+            if evt.index is None or evt.index >= len(names):
+                return gr.update()
+            chosen = list(current or [])
+            name = names[evt.index]
+            if name not in chosen:
+                chosen.append(name)
+            return gr.update(value=chosen)
+
+        review_gallery.select(
+            _select_review, inputs=[review_names, review_select], outputs=[review_select]
+        )
+
+        def _rescue(trigger: str, repeats: float, selected: list[str] | None):
+            run_settings = build_settings(settings, trigger, repeats)
+            ws = make_context(run_settings).workspace
+            count = promote_to_clean(ws, selected or [], run_settings)
+            remaining = [Path(p).name for p, _ in gallery_items(ws.manual_review)]
+            note = (
+                f"✅ Rescued **{count}** panel(s) into `04_clean`. Click **▶ Build dataset** to "
+                "caption them — the heavy stages skip, only captioning re-runs."
+                if count
+                else "Nothing selected — click thumbnails above (or pick names) first."
+            )
+            return (
+                gallery_items(ws.manual_review),
+                remaining,
+                gr.update(choices=remaining, value=[]),
+                note,
+            )
+
+        rescue_btn.click(
+            _rescue,
+            inputs=[trigger_in, repeats_in, review_select],
+            outputs=[review_gallery, review_names, review_select, rescue_status],
+        )
+        rescue_all_btn.click(
+            _rescue,
+            inputs=[trigger_in, repeats_in, review_names],
+            outputs=[review_gallery, review_names, review_select, rescue_status],
+        )
+
+        def _recaption(trigger: str, repeats: float):
+            run_settings = build_settings(settings, trigger, repeats)
+            result = recaption_training_dir(run_settings, model="gemini-2.5-pro", style="rich")
+            training = make_context(run_settings).workspace.training_dir(
+                run_settings.dataset_repeats, run_settings.trigger_token
+            )
+            if result.written:
+                note = f"✅ Re-captioned **{result.written}** image(s) with Gemini Pro (prose)"
+                note += f" — {result.failed} failed." if result.failed else "."
+                if result.errors:
+                    note += " " + "; ".join(result.errors[:3])
+            else:
+                note = "⚠️ " + (result.errors[0] if result.errors else "nothing to do.")
+            return gallery_items(training), note
+
+        recaption_btn.click(
+            _recaption, inputs=[trigger_in, repeats_in], outputs=[result_gallery, recaption_status]
         )
 
         to_step4.click(lambda: gr.update(visible=True), outputs=[step4])

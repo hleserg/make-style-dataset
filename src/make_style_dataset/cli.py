@@ -81,6 +81,29 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_common(run_all_parser)
 
+    recaption_parser = sub.add_parser(
+        "recaption",
+        help="Re-caption a finished dataset with a Gemini VLM (prose), via the proxy.",
+        description=(
+            "Rewrite a dataset folder's .txt sidecars with trigger-first prose that describes "
+            "content and never names the style (Flux style-LoRA captioning). Calls Gemini through "
+            "the proxy Space because the box's region is geo-blocked."
+        ),
+    )
+    recaption_parser.add_argument("--workspace", type=Path, help="Override the workspace root.")
+    recaption_parser.add_argument(
+        "--dir", type=Path, dest="target_dir", help="Dataset folder (default: the training dir)."
+    )
+    recaption_parser.add_argument("--model", help="Gemini model (default: settings.vlm_model).")
+    recaption_parser.add_argument(
+        "--style",
+        choices=("optimal", "rich"),
+        help="Caption style (default: settings.vlm_prompt_style).",
+    )
+    recaption_parser.add_argument(
+        "--trigger", help="Trigger token (default: settings.trigger_token)."
+    )
+
     return parser
 
 
@@ -141,6 +164,39 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         launch_ui(_resolve_context(args))
         return 0
+
+    if args.command == "recaption":
+        settings = _resolve_settings(args)
+        if not settings.hf_token:
+            print(
+                "Error: no HF token. Put HF_TOKEN (read access to the proxy Space) in .env.",
+                file=sys.stderr,
+            )
+            return 1
+        from make_style_dataset.proxy import GeminiProxyClient
+        from make_style_dataset.vlm_caption import recaption_dataset
+
+        trigger = args.trigger or settings.trigger_token
+        workspace = Workspace(root=settings.workspace)
+        target = args.target_dir or workspace.training_dir(settings.dataset_repeats, trigger)
+        if not target.is_dir():
+            print(f"Error: dataset folder not found: {target}", file=sys.stderr)
+            return 1
+        model = args.model or settings.vlm_model
+        style = args.style or settings.vlm_prompt_style
+        print(f"Re-captioning {target} with {model} ({style}, trigger '{trigger}')...")
+        result = recaption_dataset(
+            target,
+            trigger=trigger,
+            model=model,
+            style=style,
+            client=GeminiProxyClient(settings.hf_token),
+            max_workers=settings.vlm_concurrency,
+        )
+        print(f"  wrote {result.written} caption(s), {result.failed} failed")
+        for err in result.errors:
+            print(f"    - {err}")
+        return 0 if result.failed == 0 else 1
 
     ctx = _resolve_context(args)
     try:

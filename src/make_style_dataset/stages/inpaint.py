@@ -25,6 +25,7 @@ rather than duplicate.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -102,9 +103,9 @@ class LamaInpainter:
         """Run LaMa and composite the repainted pixels into the masked region."""
         session = self._get_session()
         size = _model_input_size(session) or LAMA_INPUT_SIZE
-        feed = lama_inputs(image, mask, size)
+        feed, box = letterbox_inputs(image, mask, size)
         raw = session.run(None, feed)[0]
-        painted = lama_output_to_bgr(raw, width=image.shape[1], height=image.shape[0])
+        painted = unletterbox_output(raw, box)
         return composite(image, painted, mask)
 
 
@@ -126,35 +127,65 @@ def make_inpainter(settings: Settings) -> Inpainter:
 # --- Pure tensor pre/post-processing (no onnxruntime needed) ---------------
 
 
-def lama_inputs(
-    image: np.ndarray, mask: np.ndarray, size: tuple[int, int]
-) -> dict[str, np.ndarray]:
-    """Build LaMa's ``{"image", "mask"}`` feed from a BGR panel and its mask.
+@dataclass(frozen=True)
+class Letterbox:
+    """Geometry to invert the pad-to-square letterboxing of a panel.
 
-    Both inputs are resized to the model's ``(height, width)`` ``size``; the
-    image becomes RGB, scaled to ``[0, 1]`` and laid out as NCHW float32. The
-    mask is resized with nearest-neighbour and re-binarised so its edges stay
-    hard (no gray bleed into the inpaint region).
+    ``edge`` is the padded square side; ``pad_top``/``pad_left`` locate the
+    native panel inside it; ``height``/``width`` are the native panel size.
+    """
+
+    edge: int
+    pad_top: int
+    pad_left: int
+    height: int
+    width: int
+
+
+def letterbox_inputs(
+    image: np.ndarray, mask: np.ndarray, size: tuple[int, int]
+) -> tuple[dict[str, np.ndarray], Letterbox]:
+    """Build LaMa's ``{"image", "mask"}`` feed **without stretching the panel**.
+
+    The fixed-input model wants a square, but a raw resize to ``size`` would
+    distort a non-square panel. Instead the panel and mask are padded to a square
+    (so proportions are preserved — every resize here is square->square), then
+    resized to the model's ``(height, width)`` ``size``. The image pad reflects
+    the edge (neutral inpaint context); the mask pad is 0 (padding is never
+    inpainted). Returns the feed plus a :class:`Letterbox` to invert it.
     """
     import cv2
     import numpy as np
 
+    height, width = image.shape[:2]
+    edge = max(height, width)
+    pad_top, pad_left = (edge - height) // 2, (edge - width) // 2
+    pad_bottom, pad_right = edge - height - pad_top, edge - width - pad_left
+
+    img_sq = cv2.copyMakeBorder(image, pad_top, pad_bottom, pad_left, pad_right, cv2.BORDER_REFLECT)
+    binary_full = (mask > MASK_THRESHOLD).astype(np.uint8)
+    mask_sq = cv2.copyMakeBorder(
+        binary_full, pad_top, pad_bottom, pad_left, pad_right, cv2.BORDER_CONSTANT, value=0
+    )
+
     target_h, target_w = size
-    rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    rgb = cv2.resize(rgb, (target_w, target_h), interpolation=cv2.INTER_AREA)
-    binary = (mask > MASK_THRESHOLD).astype(np.uint8)
-    binary = cv2.resize(binary, (target_w, target_h), interpolation=cv2.INTER_NEAREST)
+    rgb = cv2.cvtColor(img_sq, cv2.COLOR_BGR2RGB)
+    rgb = cv2.resize(rgb, (target_w, target_h), interpolation=cv2.INTER_AREA)  # square -> square
+    binary = cv2.resize(mask_sq, (target_w, target_h), interpolation=cv2.INTER_NEAREST)
 
     image_chw = np.transpose(rgb.astype(np.float32) / 255.0, (2, 0, 1))[np.newaxis, ...]
     mask_chw = binary.astype(np.float32)[np.newaxis, np.newaxis, ...]
-    return {"image": image_chw, "mask": mask_chw}
+    box = Letterbox(edge=edge, pad_top=pad_top, pad_left=pad_left, height=height, width=width)
+    return {"image": image_chw, "mask": mask_chw}, box
 
 
-def lama_output_to_bgr(raw: np.ndarray, *, width: int, height: int) -> np.ndarray:
-    """Turn LaMa's NCHW float output into a ``height`` x ``width`` BGR uint8 image.
+def unletterbox_output(raw: np.ndarray, box: Letterbox) -> np.ndarray:
+    """Invert :func:`letterbox_inputs`: model output -> native-size BGR panel.
 
-    LaMa emits values around ``[0, 255]`` that can stray slightly out of range,
-    so we clip before casting (a bare cast would wrap and speckle the result).
+    Resizes the square model output back to ``box.edge`` (square -> square, so no
+    stretch) and crops out the native panel region, undoing the padding. LaMa
+    emits values around ``[0, 255]`` that can stray out of range, so we clip
+    before casting (a bare cast would wrap and speckle the result).
     """
     import cv2
     import numpy as np
@@ -165,9 +196,8 @@ def lama_output_to_bgr(raw: np.ndarray, *, width: int, height: int) -> np.ndarra
     hwc = np.transpose(array, (1, 2, 0))  # CHW -> HWC (RGB)
     rgb = np.clip(hwc, 0, 255).astype(np.uint8)
     bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
-    if bgr.shape[0] != height or bgr.shape[1] != width:
-        bgr = cv2.resize(bgr, (width, height), interpolation=cv2.INTER_AREA)
-    return bgr
+    square = cv2.resize(bgr, (box.edge, box.edge), interpolation=cv2.INTER_LANCZOS4)
+    return square[box.pad_top : box.pad_top + box.height, box.pad_left : box.pad_left + box.width]
 
 
 def composite(original: np.ndarray, painted: np.ndarray, mask: np.ndarray) -> np.ndarray:
