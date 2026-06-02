@@ -3,87 +3,102 @@
 Живая рабочая записка по задаче **HLE-803** (стилевая LoRA `cmcstyle`). Родитель —
 HLE-802. Обновлено 2026-06-02.
 
+> **СТАТУС:** датасет готов, механизм проверен репетицией, **ночной запуск обучения
+> запланирован на среду 2026-06-03 02:00 (один раз).** Утром — снять диагностику + eval.
+
 ---
 
 ## Часть 1 — для человека (простым языком)
 
 ### О чём задача
-Обучить **стилевую LoRA `cmcstyle`** — маленький адаптер к Flux.1-dev, который
-накладывает манеру нашего комикса (пейнтерли-историческая BD) на **любой** сюжет,
-**не** протаскивая конкретных персонажей/сцен/панелей из обучающих картинок.
+Обучить **стилевую LoRA `cmcstyle`** — адаптер к Flux.1-dev, накладывающий манеру
+комикса (пейнтерли-историческая BD) на **любой** сюжет, **не** протаскивая конкретных
+персонажей/сцен/панелей.
 
 ### Кто что делает
-- **Другой агент** — собирает сам датасет: нарезка панелей, удаление бабблов, чистка,
-  **капшнинг**. Его зона, я туда не лезу.
-- **Я (style-lora агент)** — обучающая половина: подобрал настройки, написал рецепт и
-  eval-инструмент, **запущу обучение по твоей команде**.
+- **Другой агент** — датасет (нарезка, бабблы, чистка) + **капшнинг** (новая VLM-проза
+  через Gemini-прокси). Его зона, не лезу.
+- **Я (style-lora агент)** — обучение + eval: настройки, рецепт, eval-инструмент,
+  лаунчер; запускаю обучение.
 
-### Что уже готово (в `main`)
-1. **Чем обучаем:** не kohya, а **ai-toolkit** (`/home/serg/ai-toolkit`). На нашей
-   16 ГБ карте kohya для Flux падает по памяти, ai-toolkit — нет (проверено, реальная
-   LoRA выходила).
-2. **Рецепт** (все настройки + объяснения + протокол проверки):
-   `docs/features/style-lora-cmcstyle.md` (и `-ru.md`).
-3. **Eval-инструмент:** `scripts/eval_style_lora.py` — после обучения одной командой
-   рисует сетку «сила LoRA × промт», чтобы оценить результат глазами.
-4. **Хендофф соседнему агенту:** `/home/serg/make-char-dataset/FLUX_TRAINING_HANDOFF.md`.
+### Что готово
+1. **Тулинг:** **ai-toolkit** (не kohya — он падает по памяти на Flux на нашей 16 ГБ).
+2. **Рецепт + настройки + протокол eval:** `docs/features/style-lora-cmcstyle.md` (+ `-ru.md`).
+3. **Eval-инструмент:** `scripts/eval_style_lora.py` (сетка «сила LoRA × промт»).
+4. **Лаунчер ночного запуска:** `scripts/train_cmcstyle_aitk.sh` (рабочая копия, которую
+   гонит таймер: `/home/serg/cmcstyle_night/launch.sh`).
+5. **Датасет готов:** `…/workspace/05_dataset/10_cmcstyle` — 116 картинок, VLM-капшны
+   прозой с триггером `cmcstyle`, без стиль-слов. ✓
+6. **Репетиция (steps=2) прошла:** вся цепочка работает под systemd (CUDA, бакеты,
+   flip-аугментация, сейв) → вышел **не пустой LoRA 344 МБ / 988 тензоров** за 366 с;
+   ~9.7 с/it → полный прогон ≈ **5–5.5 ч**.
 
-### Что нужно ОТ ТЕБЯ, чтобы я запустил обучение
-1. **Готовый датасет `cmcstyle`** от другого агента + 3 условия (без них LoRA выйдет плохой):
-   - триггер в капшнах = **`cmcstyle`** (не `comicstyle`);
-   - капшны **только про содержимое, без слов о стиле** (не «comic / lineart / monochrome»),
-     иначе стиль «прилипнет» к словам, а не к триггеру. _(Другой агент переходит на
-     VLM-капшны прозой через Gemini — это правильный путь.)_
-   - **разнообразные** кадры (разные персонажи/сцены), не 50 картинок одного героя.
-2. **Свободная видеокарта.** Flux хочет почти все 16 ГБ — нельзя параллельно гонять
-   другой тяжёлый GPU-процесс.
-3. **Скажи «го».** Сам обучение не запускаю.
+### Ночной запуск (запланирован)
+- **Таймер `cmcstyle-night.timer` → среда 02:00, один раз** (не повторяется),
+  запускает `scripts/train_cmcstyle_aitk.sh night` (steps=2000, чекпоинты каждые 250).
+- В 02:00 лаунчер **сам проверит**: датасет готов+стабилен, GPU свободна (<2 ГБ), CUDA.
+  Если что-то не так — **чисто прервётся и запишет причину** (не запустит обучение зря).
 
-### Что я сделаю по «го»
-1. Впишу путь к датасету в конфиг, прогоню **короткий тест** (5 шагов, пара минут) —
-   проверить, что всё влезает и сохраняется.
-2. Запущу **полное обучение** (~4–5 часов), чекпоинты каждые 250 шагов.
-3. Прогоню eval-инструмент, соберу сетку, **выберу лучший чекпоинт и силу LoRA**.
-4. Отдам: `cmcstyle.safetensors` + сетку-отчёт + зафиксированные настройки.
+### Что нужно ОТ ТЕБЯ
+1. **Не выключай и не ребутай WSL сегодня ночью** — таймер (transient) не переживёт
+   перезагрузку.
+2. Если ночью будет работать сосед (его char-LoRA на GPU) — мой запуск это увидит и
+   прервётся; перепланируем.
+3. **Утром пингни меня** — сниму диагностику и прогоню eval.
 
-### Команды (когда дойдём до запуска)
+### Что я сделаю утром
+1. Сниму диагностику: пик/запас VRAM (`gpu.csv`), s/it, кривая loss, время загрузки,
+   размер+тензоры LoRA (`meta.json`, `train.log`).
+2. Прогоню `scripts/eval_style_lora.py` по чекпоинтам в ComfyUI → сетка «вес × промт» →
+   **выберу лучший чекпоинт и силу LoRA**, проверю утечку лиц/рамок/бабблов.
+3. Отдам `cmcstyle.safetensors` + сетку-отчёт + зафиксированные настройки + рекомендации.
+
+### Команды
 ```bash
-# обучение (после правки пути к датасету в конфиге из рецепта):
-cd /home/serg/ai-toolkit && venv/bin/python run.py <твой_cmcstyle_конфиг>.yaml
-# проверка результата (ComfyUI должен быть запущен):
-python scripts/eval_style_lora.py --lora cmcstyle.safetensors
+# отменить ночной запуск:
+systemctl stop cmcstyle-night.timer
+# утром — где результаты (символ. ссылка на последний прогон):
+ls -l /home/serg/cmcstyle_night/latest/        # meta.json, train.log, gpu.csv, out/cmcstyle_flux/
+# eval (ComfyUI запущен):
+python scripts/eval_style_lora.py --lora <чекпоинт>.safetensors
 ```
+
+### Где что лежит
+| Что | Путь |
+|---|---|
+| Рецепт + настройки + eval-протокол | `docs/features/style-lora-cmcstyle.md` (+ `-ru.md`) |
+| Eval-инструмент | `scripts/eval_style_lora.py` |
+| Лаунчер (репо-копия / рабочая) | `scripts/train_cmcstyle_aitk.sh` / `/home/serg/cmcstyle_night/launch.sh` |
+| Диагностика прогонов | `/home/serg/cmcstyle_night/runs/<ts>_night/` (+ `latest`) |
+| Датасет | `…/make-style-dataset/workspace/05_dataset/10_cmcstyle` |
+| Хендоффы соседу | `make-char-dataset/FLUX_TRAINING_HANDOFF.md`, `CAPTIONING_SYSTEM.md` |
 
 ---
 
 ## Часть 2 — для агента (резюме на возобновление)
 
 **Роль:** style-lora агент (HLE-803), обучающая половина. Датасет+капшнинг — другой
-агент, **не трогать** (ни `workspace/`, ни стадии pipeline, ни `caption.py`). Подробности
-в памяти: `hle803-style-lora-agent-scope`, `train-stage-sd-scripts`,
-`gemini-proxy-and-vlm-caption`.
+агент, **не трогать** (`workspace/`, стадии pipeline, `caption.py`). Память:
+`hle803-style-lora-agent-scope`, `train-stage-sd-scripts`, `gemini-proxy-and-vlm-caption`.
 
-**Сделано (в `main`):** PR #22 рецепт-доки (`docs/features/style-lora-cmcstyle.md` + `-ru`),
-PR #23 eval-харнесс (`scripts/eval_style_lora.py`). Worktree
-`.claude/worktrees/hle-803-style-lora`, ветка `hleserg/hle-803-style-lora-…`.
+**В `main`:** PR #22 рецепт-доки, #23 eval-харнесс, #24 этот статус, + лаунчер
+`scripts/train_cmcstyle_aitk.sh`. Worktree `.claude/worktrees/hle-803-style-lora`.
 
-**Тулинг = ai-toolkit, НЕ kohya.** `/home/serg/ai-toolkit` v0.9.14, venv torch
-2.12.dev+cu128 sm_120. Запуск: `venv/bin/python run.py <cfg>.yaml`, **онлайн** (НЕ
-`HF_HUB_OFFLINE=1`). Грабли: `qtype: qfloat8 + qtype_te: qfloat8 + low_vram: true`
-(qint4 ломается); `dtype: bf16` (не fp16); `disable_sampling: true` (sampling-пресет
-тянет весь трансформер на GPU → OOM, eval делаем пост-хок в ComfyUI); ~7–9 с/it на 512
-→ полный прогон ~4–5 ч. Полный конфиг — в рецепт-доке; шаблон fit-check — `/tmp/flux_fitcheck.yaml`.
+**Тулинг = ai-toolkit (НЕ kohya).** `/home/serg/ai-toolkit` v0.9.14, venv torch
+2.12.dev+cu128 sm_120. Запуск **онлайн** (НЕ `HF_HUB_OFFLINE=1`). Грабли: `qtype:
+qfloat8 + qtype_te: qfloat8 + low_vram: true` (qint4 ломается); `dtype: bf16`;
+`disable_sampling: true` (in-training sampling → OOM, eval пост-хок в ComfyUI);
+nvidia-smi на WSL — в `/usr/lib/wsl/lib` (нужен в PATH для systemd). ~9.7 с/it @512 rank32.
 
-**По сигналу «го» (порядок):**
-1. Получить путь готового `cmcstyle`-датасета; проверить предусловия (триггер `cmcstyle`,
-   капшны без стиль-слов, разнообразие). Согласовать свободу GPU с соседом.
-2. Вписать `<DATASET_DIR>` в конфиг из рецепта; **fit-check** (`steps: 5`, `save_every: 5`)
-   → дошёл до «saved» и записал `.safetensors`.
-3. Полный прогон (steps 2000, save_every 250). Затем `scripts/eval_style_lora.py --lora …`
-   по чекпоинтам → выбрать лучший (стиль есть, промт слушается, нет утечки лиц/рамок/бабблов).
-4. Отдать LoRA + сетку + гиперпараметры; тогда закрыть HLE-803 как Done.
+**Ночной запуск (2026-06-03 02:00, one-shot).** `cmcstyle-night.timer` →
+`scripts/train_cmcstyle_aitk.sh night`. Лаунчер сам проверяет предусловия и абортит+логирует.
+- **Снять результаты в один шаг:** `/home/serg/cmcstyle_night/latest/` → `meta.json`
+  (status/тайминги/safetensors bytes+tensors), `train.log`, `gpu.csv`, `env.txt`,
+  `out/cmcstyle_flux/` (чекпоинты). Затем eval пост-хок: `scripts/eval_style_lora.py --lora …`.
+- **Отмена:** `systemctl stop cmcstyle-night.timer`. Caveats: transient-таймер не
+  переживёт ребут WSL; репетиция оставила безвредный переиспользуемый `_latent_cache/`
+  в датасет-папке соседа.
 
-**Открытое:** триггер по умолчанию в репо `comicstyle`, контракт требует `cmcstyle` —
-ставится агентом датасета ДО капшнинга. После сквош-мержа ветку синхронизировать
-`git reset --hard origin/main` (или `git rebase --onto origin/main <old-tip>`), иначе
-смерженные файлы всплывают повторно как add/add.
+**После успеха + eval:** закрыть HLE-803 как Done. **Открытое:** триггер по умолчанию в
+репо `comicstyle`, но датасет уже на `cmcstyle` (см. `10_cmcstyle`). После сквош-мержа
+ветку синхронизировать `git reset --hard origin/main`.
