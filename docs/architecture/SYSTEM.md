@@ -7,8 +7,7 @@ folder under the workspace and writes the next.
 
 ## Pipeline stages
 
-The pipeline has six conceptual stages — an input drop plus five transforms,
-one per CLI subcommand:
+The pipeline has an input drop plus six transforms, one per CLI subcommand:
 
 0. **pages** *(input)* — raw pages land in `00_pages/`.
 1. **panels** — detect comic panels and slice pages into individual panels (Kumiko + OpenCV).
@@ -16,10 +15,14 @@ one per CLI subcommand:
 3. **inpaint** — paint the masked bubbles out of each panel.
 4. **clean** — drop near-duplicates (perceptual hash) and too-small panels.
 5. **caption** — caption survivors and lay out `05_dataset/<N>_<trigger>/`.
+6. **train** *(opt-in)* — train a style LoRA from the dataset into `06_lora/` by
+   shelling out to a local [kohya sd-scripts](https://github.com/kohya-ss/sd-scripts)
+   venv (SD 1.5 / SDXL / Flux).
 
 `run-all` executes stages 1–5 in order; each stage is idempotent (see
-[Workspace contract](WORKSPACE.md)). Stage internals are stubs at S0 and are
-filled in by the per-stage issues (HLE-742 …).
+[Workspace contract](WORKSPACE.md)). **Stage 6 (`train`) is off by default**
+(`APP_RUN_TRAIN=false`): it is heavy and needs a GPU + a base checkpoint, so it
+is run explicitly with `make-style-dataset train` or the app's *Train* step.
 
 ## Components
 
@@ -30,13 +33,17 @@ filled in by the per-stage issues (HLE-742 …).
 - **config** — typed settings (paths, trigger token, thresholds, stage flags);
   the only place that reads the environment.
 - **observability** — Sentry init (`send_default_pii=False`) + per-stage
-  component tags (`stage:panels`, `stage:bubbles`, …).
+  component tags (`stage:panels`, `stage:bubbles`, …, `stage:train`).
+- **stages/train** — pure kohya `dataset.toml` + argv builders and an stdout
+  progress parser, behind a `Trainer` protocol; the `SdScriptsTrainer` adapter
+  spawns a *separate* (root-owned) trainer venv, never imported into this package.
 
 ## Data flow
 
 ```mermaid
 flowchart LR
     In[00_pages] --> panels --> bubbles --> inpaint --> clean --> caption --> DS[(05_dataset)]
+    DS -.->|train · opt-in| L[(06_lora)]
     panels -.tags.-> Sentry
     caption -.tags.-> Sentry
 ```

@@ -151,6 +151,82 @@ to rescue everything.
 
 ---
 
+## Training a LoRA (optional)
+
+The dataset is the hard part. If you want, this tool can also **train the style
+LoRA** for you, locally, from the dataset you just built.
+
+> **This is an advanced, optional step.** It needs an NVIDIA GPU and a base
+> model (a Stable Diffusion / Flux checkpoint) on your disk. Training takes a
+> while — minutes to hours depending on the model and your GPU.
+
+### One-time training setup
+
+Training runs through **kohya sd-scripts**, a separate tool, in its own Python
+environment (kept apart so its libraries can't clash with this project's). Set
+it up once:
+
+```bash
+git clone https://github.com/kohya-ss/sd-scripts ~/sd-scripts
+cd ~/sd-scripts
+python -m venv venv && . venv/bin/activate
+# On an NVIDIA RTX 50-series (Blackwell) card, install the cu128 PyTorch build:
+pip install torch --index-url https://download.pytorch.org/whl/cu128
+pip install -r requirements.txt
+deactivate
+```
+
+Then point the tool at it and at your base model — open `.env` and set:
+
+```ini
+APP_TRAIN_SD_SCRIPTS_DIR=/home/you/sd-scripts
+APP_TRAIN_BASE_MODEL=/path/to/your/base-model.safetensors
+APP_TRAIN_MODEL_TYPE=sdxl        # sd15 | sdxl | flux
+```
+
+Check it's ready:
+
+```bash
+uv run make-style-dataset doctor
+```
+
+The training lines (`sd-scripts`, `base model`, `trainer torch`) should all say
+`[ok]` — the `trainer torch` line confirms your GPU's kernels are present.
+
+### Pick a base-model family
+
+Train on any of three families — start simple, move up if you want:
+
+| Family | When | Notes |
+|---|---|---|
+| **SD 1.5** | fastest, smallest | Great for a quick first run; older quality. |
+| **SDXL** | the sweet spot | Fits a 16 GB card cleanly; the usual choice for style LoRAs (Illustrious / Pony / NoobAI bases). |
+| **Flux** | highest quality | Tight on 16 GB — needs the extra `APP_TRAIN_FLUX_*` paths (CLIP-L, T5-XXL, VAE) and is slower. |
+
+Set `APP_TRAIN_MODEL_TYPE` accordingly (for Flux, also the three `APP_TRAIN_FLUX_*`
+paths and `APP_TRAIN_MIXED_PRECISION=bf16`). See `.env.example` for every knob.
+
+### Train it
+
+**In the app:** after building a dataset, click **“Train a LoRA from this
+dataset →”**, pick the family and base model, and press **▶ Train LoRA**. The log
+streams while it runs; when it finishes, download the `.safetensors`.
+
+**From the command line:**
+
+```bash
+uv run make-style-dataset train
+```
+
+Per-step progress (loss, steps) prints in the terminal. Your trained LoRA lands
+in **`workspace/06_lora/<trigger>.safetensors`** — drop it into ComfyUI / A1111
+and summon your style with the trigger word.
+
+> **16 GB GPU?** Keep batch size at 1; SDXL fits with the defaults. For Flux,
+> raise `APP_TRAIN_FLUX_BLOCKS_TO_SWAP` (up to 35) if you run out of memory.
+
+---
+
 ## Troubleshooting
 
 | What you see | What's happening / what to do |
@@ -161,6 +237,8 @@ to rescue everything.
 | Very slow | You're running on CPU. The AI steps want an NVIDIA GPU. |
 | `command not found: uv` | Close and reopen your terminal, then try again (setup added `uv` to your path). |
 | Want to start over | Delete the `workspace/` folder and run `uv run make-style-dataset init`. |
+| Training: `Error: no dataset images` | Build a dataset first (the `train` step reads `05_dataset/`). |
+| Training: `doctor` shows `[--] sd-scripts` / `trainer torch` | The kohya sd-scripts clone or its GPU venv isn't set up — see *Training a LoRA* above. |
 
 ---
 
@@ -177,6 +255,7 @@ uv run make-style-dataset ui           # the app: drop pages, Build, download .z
 #   put pages in workspace/00_pages/
 uv run make-style-dataset run-all      # each time
 #   collect workspace/05_dataset/<N>_<trigger>/
+uv run make-style-dataset train        # optional: train the LoRA -> workspace/06_lora/
 ```
 
 For the technical details of each stage, see the [README](../README.md) and
