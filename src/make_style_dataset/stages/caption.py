@@ -26,6 +26,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
+from make_style_dataset.media import image_files
 from make_style_dataset.observability import tag_component
 from make_style_dataset.stages.base import Stage, StageContext, StageResult
 
@@ -55,9 +56,6 @@ CATEGORY_GENERAL = 0
 
 #: Default probability cutoff for keeping a general tag (kohya's --thresh).
 DEFAULT_CAPTION_THRESHOLD = 0.35
-
-#: Image file suffixes accepted from ``04_clean``.
-IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp", ".bmp"})
 
 
 class Tagger(Protocol):
@@ -243,13 +241,7 @@ def _write_caption(text: str, path: Path) -> None:
 
 def iter_images(clean_dir: Path) -> list[Path]:
     """Return clean image files under ``clean_dir`` in stable (sorted) order."""
-    if not clean_dir.is_dir():
-        return []
-    return sorted(
-        path
-        for path in clean_dir.iterdir()
-        if path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES
-    )
+    return image_files(clean_dir)
 
 
 def caption_image(

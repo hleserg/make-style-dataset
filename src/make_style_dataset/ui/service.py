@@ -15,11 +15,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from make_style_dataset.config import Settings
+from make_style_dataset.media import IMAGE_SUFFIXES, image_files
 from make_style_dataset.pipeline import STAGES, run_stage
 from make_style_dataset.stages.base import Stage, StageContext, StageResult
-
-#: Image suffixes the UI recognises (kept in sync with the pipeline's set).
-_IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp", ".bmp"})
 
 #: Glyphs prefixed to each progress line, one per phase.
 _PHASE_GLYPH = {"running": "…", "done": "✓", "skipped": "•", "error": "✗"}
@@ -47,7 +45,7 @@ def save_uploaded_pages(uploaded: Iterable[str | Path] | None, pages_dir: Path) 
     saved = 0
     for item in uploaded or []:
         src = Path(item)
-        if src.suffix.lower() not in _IMAGE_SUFFIXES:
+        if src.suffix.lower() not in IMAGE_SUFFIXES:
             continue
         shutil.copy2(src, pages_dir / src.name)
         saved += 1
@@ -60,12 +58,8 @@ def gallery_items(directory: Path) -> list[tuple[str, str]]:
     The caption is the sidecar ``<name>.txt`` if present, else the file name.
     A missing directory yields an empty list (the gallery just shows nothing).
     """
-    if not directory.is_dir():
-        return []
     items: list[tuple[str, str]] = []
-    for path in sorted(directory.iterdir()):
-        if not (path.is_file() and path.suffix.lower() in _IMAGE_SUFFIXES):
-            continue
+    for path in image_files(directory):
         sidecar = path.with_suffix(".txt")
         caption = sidecar.read_text(encoding="utf-8").strip() if sidecar.is_file() else path.name
         items.append((str(path), caption))

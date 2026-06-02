@@ -11,12 +11,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from make_style_dataset.config import Settings
+from make_style_dataset.media import image_files
 from make_style_dataset.stages import bubbles, caption, clean, inpaint, panels
 from make_style_dataset.stages.base import Stage, StageContext, StageResult
 from make_style_dataset.workspace import Workspace
-
-#: Image suffixes counted per stage folder in the run summary.
-_IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp", ".bmp"})
 
 #: Stages in execution order. Order is load-bearing: each consumes the previous
 #: stage's output directory.
@@ -102,13 +100,7 @@ def run_all(ctx: StageContext, *, force: bool = False) -> list[StageResult]:
 
 def _count_images(directory: Path) -> int:
     """Count image files directly under ``directory`` (0 when it is absent)."""
-    if not directory.is_dir():
-        return 0
-    return sum(
-        1
-        for path in directory.iterdir()
-        if path.is_file() and path.suffix.lower() in _IMAGE_SUFFIXES
-    )
+    return len(image_files(directory))
 
 
 def summarize_run(ctx: StageContext) -> str:

@@ -20,15 +20,13 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from make_style_dataset.media import image_files
 from make_style_dataset.workspace import Workspace
 
 #: Default location of the committed template env file (relative to the cwd).
 DEFAULT_ENV_EXAMPLE = Path(".env.example")
 #: Default location of the user's local env file (git-ignored).
 DEFAULT_ENV_PATH = Path(".env")
-
-#: Image suffixes counted as "pages dropped" by :func:`probe_workspace`.
-_IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp", ".bmp"})
 
 
 # --- init -----------------------------------------------------------------
@@ -164,11 +162,7 @@ def probe_workspace(workspace: Workspace) -> list[Check]:
     pages_dir = workspace.pages
     if not pages_dir.is_dir():
         return [Check("workspace", False, f"{pages_dir} missing (run: make-style-dataset init)")]
-    page_count = sum(
-        1
-        for path in pages_dir.iterdir()
-        if path.is_file() and path.suffix.lower() in _IMAGE_SUFFIXES
-    )
+    page_count = len(image_files(pages_dir))
     detail = f"{pages_dir}: {page_count} page(s) ready"
     return [Check("workspace", True, detail), Check("pages", page_count > 0, f"{page_count} found")]
 
