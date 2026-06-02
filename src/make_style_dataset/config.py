@@ -89,9 +89,14 @@ class Settings(BaseSettings):
         description="Perceptual-hash distance below which two panels are near-duplicates.",
     )
     min_side_px: int = Field(
-        default=512,
+        default=256,
         ge=1,
-        description="Drop panels whose shorter side is below this many pixels.",
+        description=(
+            "Floor below which a panel is too small to upscale cleanly and is routed "
+            "to manual_review. Panels at or above it are kept and Lanczos-upscaled to "
+            "target_side. Keep this well under target_side (a comic page yields many "
+            "300-500px panels): a high floor silently dumps most of the dataset."
+        ),
     )
     target_side: int = Field(
         default=1024,

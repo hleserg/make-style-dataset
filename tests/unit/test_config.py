@@ -24,7 +24,7 @@ def test_pipeline_defaults() -> None:
     assert settings.dataset_repeats == 10
     assert settings.min_panel_area == 10_000
     assert settings.dedup_hamming_distance == 6
-    assert settings.min_side_px == 512
+    assert settings.min_side_px == 256
     assert settings.target_side == 1024
     assert settings.run_panels is True
     assert settings.run_caption is True
