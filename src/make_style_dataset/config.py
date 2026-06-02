@@ -155,6 +155,18 @@ class Settings(BaseSettings):
         description="Min WD14 confidence to keep a content tag (0.65-0.75 for 'reliable only').",
     )
 
+    # --- Local web UI (S8) ---
+    ui_host: str = Field(
+        default="127.0.0.1",
+        description="Host for the local UI server. Keep it loopback unless you know why.",
+    )
+    ui_port: int = Field(
+        default=7860,
+        ge=1,
+        le=65535,
+        description="Port for the local UI server.",
+    )
+
     # --- Pipeline: stage flags (gate which stages 'run-all' executes) ---
     run_panels: bool = True
     run_bubbles: bool = True

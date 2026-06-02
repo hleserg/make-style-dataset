@@ -35,11 +35,11 @@ echo "    uv $(uv --version | awk '{print $2}')"
 
 echo "==> 2/4  Installing dependencies (this can take a while the first time)"
 if [ "$GPU" -eq 1 ]; then
-  echo "    including the GPU/ML stack (several GB) ..."
-  uv sync --all-extras --group gpu
+  echo "    including the GPU/ML stack (several GB) and the web UI ..."
+  uv sync --all-extras --group gpu --group ui
 else
-  echo "    CPU-only (skipping the GPU/ML group) ..."
-  uv sync --all-extras
+  echo "    CPU-only (skipping the GPU/ML group), with the web UI ..."
+  uv sync --all-extras --group ui
 fi
 
 echo "==> 3/4  Scaffolding the workspace"
@@ -51,11 +51,15 @@ uv run make-style-dataset doctor || true
 cat <<'DONE'
 
 ----------------------------------------------------------------------
-Setup finished. To build a dataset:
+Setup finished. The easiest way to build a dataset is the app:
 
-  1. Put your comic pages into:  workspace/00_pages/
-  2. Run:                        uv run make-style-dataset run-all
-  3. Collect the result from:    workspace/05_dataset/
+  uv run make-style-dataset ui      (or: make ui)
+
+It opens a 3-step wizard in your browser: name your style, drag pages
+in, press Build, download the .zip.
+
+Prefer the terminal? Drop pages into workspace/00_pages/ and run
+  uv run make-style-dataset run-all
 
 The first real run downloads the AI models (a few GB) and takes a few
 minutes — that is normal, it has not frozen.

@@ -15,7 +15,8 @@ and size-filter, then caption and lay out the final dataset folder.
 
 > **Not a developer?** Start with the plain-language
 > [**step-by-step User Guide**](docs/USER_GUIDE.md) ([RU](docs/USER_GUIDE-ru.md)):
-> one setup command (`bash scripts/setup.sh`), drop pages in, run.
+> one setup command (`bash scripts/setup.sh`), then a point-and-click app
+> (`make ui`) — drop pages in, press Build, download the dataset.
 
 ---
 
@@ -50,7 +51,8 @@ artifacts each stage produced.
 
 ```bash
 bash scripts/setup.sh                # one-command setup; --no-gpu to skip the GPU stack
-#   then drop pages into workspace/00_pages/
+uv run make-style-dataset ui         # the app: drop pages, Build, download .zip  (or: make ui)
+#   prefer the terminal? drop pages into workspace/00_pages/ and run:
 uv run make-style-dataset run-all    # build the dataset
 ```
 
@@ -129,6 +131,7 @@ make setup       # one-command first-time setup (deps + workspace + env check)
 make install     # uv sync --all-extras + pre-commit install
 make init        # scaffold the workspace folders + seed .env
 make doctor      # check this machine is ready (Python, GPU, workspace)
+make ui          # launch the local web UI (installs the 'ui' group on first run)
 make check       # lint + fmt-check + type + security + tests  (DoD gate)
 make run-all     # run the full pipeline
 make panels      # run a single stage (also: bubbles/inpaint/caption)

@@ -58,13 +58,36 @@ It prints a checklist — every line should say `[ok]`.
 
 ## Building a dataset
 
-### Step 1 — add your pages
+### The easy way — the app (recommended)
+
+After setup, open the app in your browser:
+
+```bash
+uv run make-style-dataset ui      # or:  make ui
+```
+
+A 3-step wizard appears:
+
+1. **Name your style** — pick a trigger word (and the kohya repeat count).
+2. **Add pages & build** — drag your comic pages in and press **▶ Build dataset**.
+   The progress log streams live. *The first run downloads several GB of AI
+   models — a step may sit on “running…” for a few minutes; that's normal, it
+   hasn't frozen.*
+3. **Get your dataset** — browse the result gallery and click **Download .zip**.
+   A separate **Manual review** tab shows the tricky pages set aside for you.
+
+That's the whole flow, no terminal needed after setup. Prefer the command line?
+The steps below do exactly the same thing.
+
+### Or run it from the command line
+
+#### Step 1 — add your pages
 
 Put your comic page images (`.png`, `.jpg`, …) into the **`workspace/00_pages/`**
 folder. The setup created it for you. One image per page; the more pages, the
 better (aim for **20+ pages** to end up with enough panels).
 
-### Step 2 — run the pipeline
+#### Step 2 — run the pipeline
 
 ```bash
 uv run make-style-dataset run-all
@@ -84,7 +107,7 @@ Pipeline summary:
   manual_review            11
 ```
 
-### Step 3 — collect your dataset
+#### Step 3 — collect your dataset
 
 Your finished dataset is in **`workspace/05_dataset/10_comicstyle/`** — a folder
 of `.png` images, each with a matching `.txt` caption next to it. That whole
@@ -145,6 +168,12 @@ to rescue everything.
 
 ```bash
 bash scripts/setup.sh                  # once
+uv run make-style-dataset ui           # the app: drop pages, Build, download .zip
+```
+
+…or all from the terminal:
+
+```bash
 #   put pages in workspace/00_pages/
 uv run make-style-dataset run-all      # each time
 #   collect workspace/05_dataset/<N>_<trigger>/

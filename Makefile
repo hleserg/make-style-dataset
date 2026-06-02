@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help install setup init doctor check lint fmt fmt-check type security test test-fast \
+.PHONY: help install setup init doctor ui check lint fmt fmt-check type security test test-fast \
 	playbook docs clean run-all panels bubbles inpaint clean-stage caption
 
 PY := uv run
@@ -20,6 +20,9 @@ init: ## Scaffold the workspace folders and seed .env
 
 doctor: ## Check this machine is ready (Python, GPU, workspace)
 	$(PY) make-style-dataset doctor
+
+ui: ## Launch the local web UI (installs the 'ui' group on first run)
+	uv run --group ui make-style-dataset ui
 
 check: lint fmt-check type security test ## Definition-of-Done gate (run before every PR)
 	@echo "all checks passed"
