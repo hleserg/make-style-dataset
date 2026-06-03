@@ -108,11 +108,17 @@ def build_flux_workflow(
     so the model is the bare base — that is the mandatory ``weight 0.0`` baseline
     column. Uses core ComfyUI node ``class_type``s only.
     """
-    graph: dict[str, dict] = {
-        "10": {
+    if unet.endswith(".gguf"):
+        # GGUF unet: applies the LoRA on-the-fly (per-layer dequant) → fits 16 GB,
+        # unlike the fp8 .safetensors path which upcasts the whole model to patch.
+        unet_loader = {"class_type": "UnetLoaderGGUF", "inputs": {"unet_name": unet}}
+    else:
+        unet_loader = {
             "class_type": "UNETLoader",
             "inputs": {"unet_name": unet, "weight_dtype": "default"},
-        },
+        }
+    graph: dict[str, dict] = {
+        "10": unet_loader,
         "11": {
             "class_type": "DualCLIPLoader",
             "inputs": {"clip_name1": clip_l, "clip_name2": t5xxl, "type": "flux"},
@@ -343,6 +349,7 @@ def run_eval(args: argparse.Namespace) -> int:
                     height=args.size,
                     steps=args.steps,
                     guidance=args.guidance,
+                    unet=args.unet,
                 )
             )
             if args.dry_run:
@@ -425,6 +432,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--steps", type=int, default=DEFAULT_STEPS)
     p.add_argument("--guidance", type=float, default=DEFAULT_GUIDANCE)
     p.add_argument("--size", type=int, default=DEFAULT_SIZE)
+    p.add_argument(
+        "--unet",
+        default=DEFAULT_UNET,
+        help="Unet/diffusion model in ComfyUI/models/unet. A *.gguf name uses UnetLoaderGGUF "
+        "(low-VRAM on-the-fly LoRA; needed for Flux+LoRA on 16 GB).",
+    )
     p.add_argument("--comfy-url", default=DEFAULT_COMFY_URL)
     p.add_argument(
         "--workflow",

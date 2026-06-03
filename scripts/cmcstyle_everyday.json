@@ -1,0 +1,89 @@
+{
+  "_comment": "cmcstyle everyday workflow — drag into ComfyUI. Uses GGUF unet for 16 GB VRAM.\n  1. Edit node 20 text: put your prompt (start with 'cmcstyle, ...')\n  2. Edit node 13 lora_name: swap checkpoint (cmcstyle_1100.safetensors → any step)\n  3. Edit node 13 strength_model: 0.7–0.85 recommended\n  4. Edit node 40 seed: change for variation",
+  "10": {
+    "class_type": "UnetLoaderGGUF",
+    "inputs": {
+      "unet_name": "flux1-dev-Q8_0.gguf"
+    }
+  },
+  "11": {
+    "class_type": "DualCLIPLoader",
+    "inputs": {
+      "clip_name1": "clip_l.safetensors",
+      "clip_name2": "t5xxl_fp16.safetensors",
+      "type": "flux"
+    }
+  },
+  "12": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "ae.safetensors"
+    }
+  },
+  "13": {
+    "class_type": "LoraLoaderModelOnly",
+    "inputs": {
+      "model": ["10", 0],
+      "lora_name": "cmcstyle_1100.safetensors",
+      "strength_model": 0.8
+    }
+  },
+  "20": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": ["11", 0],
+      "text": "cmcstyle, a red sports car parked on a wet city street at night, muted earthy palette, watercolor wash, fine ink linework"
+    }
+  },
+  "21": {
+    "class_type": "FluxGuidance",
+    "inputs": {
+      "conditioning": ["20", 0],
+      "guidance": 3.5
+    }
+  },
+  "22": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": ["11", 0],
+      "text": ""
+    }
+  },
+  "30": {
+    "class_type": "EmptySD3LatentImage",
+    "inputs": {
+      "width": 1024,
+      "height": 1024,
+      "batch_size": 1
+    }
+  },
+  "40": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": ["13", 0],
+      "positive": ["21", 0],
+      "negative": ["22", 0],
+      "latent_image": ["30", 0],
+      "seed": 42,
+      "steps": 20,
+      "cfg": 1.0,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1.0
+    }
+  },
+  "50": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": ["40", 0],
+      "vae": ["12", 0]
+    }
+  },
+  "60": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "images": ["50", 0],
+      "filename_prefix": "cmcstyle"
+    }
+  }
+}
