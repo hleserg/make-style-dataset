@@ -1,0 +1,72 @@
+---
+# cmcstyle Flux style-LoRA — CLOUD config (quality-preferred; for a rented >=24 GB GPU).
+# Differs from the local 16 GB recipe (docs/features/style-lora-cmcstyle.md) ONLY where
+# extra VRAM lets us pick the better option. Placeholders (__X__) are filled by provision_and_train.sh.
+job: extension
+config:
+  name: "cmcstyle_flux"
+  process:
+    - type: 'sd_trainer'
+      training_folder: "__OUTPUT_DIR__"
+      device: cuda:0
+      trigger_word: "cmcstyle"
+      network:
+        type: "lora"
+        linear: 32                    # KEEP (validated; rank for a style LoRA)
+        linear_alpha: 16              # KEEP (alpha/rank 0.5 = conservative effective LR)
+      save:
+        dtype: float16
+        save_every: __SAVE_EVERY__    # 100 on cloud (fast) — finer best-checkpoint selection
+        max_step_saves_to_keep: 20    # keep all of them (cloud disk is cheap)
+        push_to_hub: false
+      datasets:
+        - folder_path: "__DATASET_DIR__"
+          caption_ext: "txt"
+          caption_dropout_rate: 0.05
+          shuffle_tokens: false
+          cache_latents_to_disk: true
+          flip_x: true
+          resolution: [ __RES__ ]     # 768 default; "512, 768, 1024" on >=48 GB
+      train:
+        batch_size: 1
+        steps: __STEPS__
+        gradient_accumulation_steps: 1
+        train_unet: true
+        train_text_encoder: false
+        gradient_checkpointing: true
+        noise_scheduler: "flowmatch"
+        optimizer: "adamw8bit"        # CLOUD: quality-preferred (local used adafactor only for 16 GB)
+        lr: 1e-4                       # KEEP (matches upstream Flux default)
+        dtype: bf16
+        disable_sampling: false        # CLOUD: in-training eval grid ON (24 GB has headroom; no low_vram).
+                                       # If a tight 24 GB card OOMs while sampling -> set true.
+        ema_config:
+          use_ema: false
+      model:
+        name_or_path: "black-forest-labs/FLUX.1-dev"   # gated diffusers repo (needs HF_TOKEN)
+        is_flux: true
+        quantize: true                 # KEEP qfloat8 (quality-neutral; fits 24 GB comfortably)
+        qtype: qfloat8
+        qtype_te: qfloat8
+        # low_vram OMITTED on cloud (>=24 GB): no CPU-quant + block-streaming -> ~3-6x faster, same quality.
+        # On a 48 GB+ card you may also drop `quantize` entirely for full bf16.
+      sample:
+        sampler: "flowmatch"
+        sample_every: 250
+        width: 1024
+        height: 1024
+        guidance_scale: 3.5            # sample at real CFG ~3.5 (not the training guidance)
+        sample_steps: 20
+        seed: 42
+        walk_seed: false
+        neg: ""
+        prompts:                       # held-out FOREIGN prompts + leakage probes
+          - "[trigger], a red sports car parked on a wet city street at night"
+          - "[trigger], an astronaut riding a horse across a desert"
+          - "[trigger], a bowl of steaming ramen on a wooden table"
+          - "[trigger], a lighthouse on a rocky coast during a storm"
+          - "[trigger], a portrait of an elderly fisherman, weathered face"
+          - "[trigger], a single robot standing alone in an empty field"
+meta:
+  name: "cmcstyle_flux"
+  version: '1.0'

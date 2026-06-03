@@ -161,7 +161,7 @@ def release_gpu_memory() -> None:
 
     gc.collect()
     try:
-        import torch
+        import torch  # pyright: ignore[reportMissingImports]
     except Exception:  # pragma: no cover - torch is an optional gpu-group dep
         return
     if torch.cuda.is_available():  # pragma: no cover - needs a real GPU present
